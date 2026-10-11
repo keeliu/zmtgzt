@@ -1,0 +1,11 @@
+node_modules/
+*.log
+*.tmp
+*.tgz
+.DS_Store
+.vscode/
+.idea/
+
+# 注意：lib/ 是预构建产物，必须提交——
+# 从 git 源码安装的插件不保证能跑构建步骤，预构建产物让
+# `dsh plugin add` 可以直接加载（也是插件市场推荐的形态）。

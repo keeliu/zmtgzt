@@ -1,0 +1,14 @@
+{
+  "name": "dsh-easel-orchestrator",
+  "description": "Easel 社媒内容编排：注册 30 个 easel_* 工具并提供五层编排契约注入",
+  "version": "0.1.0",
+  "entry": {
+    "name": "dsh-easel-orchestrator",
+    "inject": [
+      "tools"
+    ]
+  },
+  "client": {
+    "platform": "web"
+  }
+}

@@ -1,0 +1,129 @@
+# dsh-easel-orchestrator
+
+把 [Easel](https://github.com/ZJU-REAL/Easel)（开源社媒内容智能体）接进 DeepSeek Harness 的 dsh 插件。
+
+**本插件不打包任何 Easel 内容。** 契约与全部技能都在运行时从你本地的 Easel 仓库读取，因此永远不会与上游漂移。插件提供的只是两个运行时之间的接缝：契约注入、技能注册、脚本执行。
+
+- **契约注入**——从你的 Easel 仓库读 `openclaw/workspace/SOUL.md` 与 `AGENTS.md`，**原文**注册为运行时技能
+- **技能注册**——扫描 `skills/openclaw/<技能名>/SKILL.md`，逐个注册为 dsh 技能，按需加载
+- **23 个 `easel_*` 工具**——技能读取、脚本执行、manifest / 画像 / 产物三类状态入口
+- **Web 视图**（`conversation.view` 槽）：技能库、账号画像、项目产物、环境体检
+
+## 安装
+
+```sh
+git clone https://github.com/ZJU-REAL/Easel   # 官方上游
+
+dsh plugin add dsh-easel-orchestrator
+```
+
+把插件指向你的仓库：
+
+```yaml
+# 在 dsh profile 配置里
+- insert:
+    - id: dsh-easel-orchestrator
+      name: dsh-easel-orchestrator
+      config:
+        easelRoot: /绝对路径/Easel
+```
+
+然后跑一次 `easel_doctor` 确认。
+
+## 工具
+
+### 技能读取——Easel 的技能直接来自磁盘
+
+| 工具 | 用途 |
+| --- | --- |
+| `easel_skill` | `list` 列出全部技能（名称/层/简介）· `read` 读 SKILL.md 正文 · `files` 列 references · `file` 读某个 reference |
+
+Easel 有约 114 个技能，其中**大多数是提示词驱动的流程**（一份 SKILL.md + `references/`），由模型读流程后执行；少数自带脚本，见下。
+
+### 脚本执行
+
+| 工具 | 用途 |
+| --- | --- |
+| `easel_run` | 按仓库相对路径执行任意 Easel 脚本，支持 `args` 与 `subcommand` |
+| `easel_scripts` | 列出可用脚本（共享脚本 / 各技能自带脚本） |
+
+### 专用脚本工具
+
+参数全部取自脚本自身的 `argparse` 定义或 `AGENTS.md` 里的命令示例，没有臆造。
+
+| 工具 | 包装的脚本 |
+| --- | --- |
+| `easel_manifest` | `shared/scripts/manifest.py`——跨层传递契约（record / meta / read / latest） |
+| `easel_output_paths` | `shared/scripts/output_paths.py`——写入前校验产物路径 |
+| `easel_model_registry` | `shared/scripts/model_registry.py`——查询已配置的媒体 provider（脱敏） |
+| `easel_persona_gate` | `shared/scripts/persona_gate.py`——发布前人设一致性检查 |
+| `easel_content_guard` | `shared/scripts/content_guard.py`——发布前敏感信息扫描 |
+| `easel_publish_log` | `skill-publish-log/scripts/log.py`——发布留痕 |
+| `easel_news` | `skill-news-intelligence/scripts/`——资讯抓取 / 日报 |
+| `easel_card_audit` | `card-design/scripts/card_audit.py`——卡片渲染后自检 |
+| `easel_novel_ops` | `novel-writer/scripts/novel_ops.py`——小说搭骨架与进度 |
+| `easel_paper_ingest` | `paper-explainer/scripts/paper_ingest.py`——论文抓取与解析 |
+| `easel_data_report` | `data-report/scripts/report.py`——数据生成报告页 |
+| `easel_assemble_video` | `auto-short-video/scripts/assemble.py`——视频合成 |
+| `easel_drama_ops` | `short-drama/scripts/drama_ops.py`——短剧资产与进度 |
+| `easel_dubbing` | `short-drama/scripts/dubbing.py`——多角色配音 |
+| `easel_performance_review` | `skill-social-performance-review/scripts/review.py` |
+| `easel_publish_analytics` | `skill-publish-analytics/scripts/analyze.py` |
+| `easel_assets` | `asset-manager/scripts/assets.py`——素材库 |
+
+### 仓库状态
+
+| 工具 | 用途 |
+| --- | --- |
+| `easel_profile` | 读写 `profiles/<画像>/{identity,style,audience,platforms,preferences,memory}.md` |
+| `easel_artifact` | 列出 `outputs/` 项目，读某个项目的 manifest 与产物 |
+| `easel_doctor` | 环境体检，逐项给出修复指引 |
+
+## 契约如何送达模型
+
+Easel 的 prompt stack 是四层（见其 `docs/prompt-stack.md`）。dsh 没有 `registerInstruction`，也没有全局 `USER.md`，因此映射关系是：
+
+| Easel 层 | dsh 实现 |
+| --- | --- |
+| Layer 1 `SOUL.md`（人格） | 从仓库读取，**原文**注入契约技能 |
+| Layer 2 `AGENTS.md`（编排） | 同上，原文注入，不做概括 |
+| Layer 3 `CONTEXT.md`（项目路径） | 由 `config.easelRoot` 替代；脚本执行器已把 cwd 固定到该目录，因此 AGENTS.md 里"先 cd 到项目根"的规则自动满足 |
+| Layer 4 `SKILL`（按需） | `skills/openclaw/<技能名>/SKILL.md` 逐个注册为 dsh 技能，正文与 `references/` 从磁盘读 |
+
+插件自己写的文字只有一段"接入说明"，讲的是上述机制。它**不含任何业务编排规则**——那些属于 `AGENTS.md`，就留在那里。
+
+## 配置
+
+| 键 | 默认值 | 说明 |
+| --- | --- | --- |
+| `easelRoot` | — | Easel 仓库绝对路径。脚本与技能能力都依赖它。 |
+| `pythonPath` | `python` | Python 解释器（Windows 常需 `py` 或完整路径） |
+| `scriptTimeoutMs` | `300000` | 单次脚本超时 |
+| `registerEaselSkills` | `true` | 是否把仓库技能注册为 dsh 技能 |
+| `skillLayers` | `[]`（全部） | 只注册指定层，如 `[discover, plan]` |
+| `injectOrchestration` | `true` | 是否注入 SOUL + AGENTS 契约 |
+
+### 未配置 `easelRoot` 时
+
+不会坏。脚本工具返回结构化的 `{ ok: false, kind, error, hint }` 而不是抛异常；契约技能会**明确声明** SOUL.md / AGENTS.md 未加载（而不是塞一份手写的替代品）；`easel_doctor` 打印出确切的修复步骤。
+
+## 开发
+
+```sh
+npm install --legacy-peer-deps   # 只需 esbuild；宿主包保持 external
+npm run build                    # → lib/index.js、lib/client.js
+npm run check                    # 两个 bundle 的语法检查
+node scripts/smoke.mjs           # 注册契约（约 20 条断言）
+node scripts/e2e.mjs             # 针对 mock Easel 仓库的行为验证（约 35 条断言）
+```
+
+`lib/` 是刻意提交的：插件安装后无需构建即可加载。
+
+## 依赖环境
+
+- dsh `>= 0.1.0-rc.6`、Node.js 22+
+- 本地 [Easel](https://github.com/ZJU-REAL/Easel) 仓库
+
+## 许可
+
+MIT。Easel 本身是 Apache-2.0，由你自行获取，本插件不重新分发它。
