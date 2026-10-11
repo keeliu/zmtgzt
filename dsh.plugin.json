@@ -1,7 +1,7 @@
 {
   "name": "dsh-zmtgzt",
-  "description": "Easel 社媒内容编排：注册 30 个 zmtgzt_* 工具并提供五层编排契约注入",
-  "version": "0.1.0",
+  "description": "把 Easel 社媒内容智能体接入 dsh：内置 Easel 快照（114 个技能 + SOUL/AGENTS 契约）免克隆，注册 23 个 zmtgzt_* 工具，并在左侧导航提供「自媒体工作台」",
+  "version": "0.2.0",
   "entry": {
     "name": "dsh-zmtgzt",
     "inject": [

@@ -1,6 +1,6 @@
 {
   "name": "dsh-zmtgzt",
-  "version": "0.1.0",
+  "version": "0.2.0",
   "description": "DeepSeek Harness plugin that brings the Easel social-content agent into dsh. Bundles an Easel snapshot (114 skills plus the SOUL.md / AGENTS.md contract) so no clone is required, releasing it to a writable workspace on first run. Registers 23 zmtgzt_* tools for contract and skill reading, script execution, and manifest/profile/topic state, and adds a Creator Workbench (自媒体工作台) entry to the sidebar via the official sidebar.panellist + main two-stage registration.",
   "license": "MIT",
   "type": "module",
