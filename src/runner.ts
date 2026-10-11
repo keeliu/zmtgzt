@@ -1,5 +1,5 @@
 /**
- * Easel 脚本执行器：所有 `easel_*` 工具的唯一确定性 IO 出口。
+ * Easel 脚本执行器：所有 `zmtgzt_*` 工具的唯一确定性 IO 出口。
  *
  * 约定（对齐 Easel 项目自身的约束）：
  *   - 脚本必须 cd 到 Easel 项目根再执行，Python 侧不支持 --cwd 参数
@@ -8,7 +8,7 @@
  *
  * Easel 根目录未配置或不存在时不抛裸异常，而是返回结构化的 `EaselUnavailable`
  * 结果——工具层据此给出可操作指引，会话不中断。
- * @module dsh-easel-orchestrator/runner
+ * @module dsh-zmtgzt/runner
  */
 import { execFile } from 'node:child_process'
 import { access, constants } from 'node:fs/promises'
@@ -64,8 +64,8 @@ async function probeRoot(config: ResolvedConfig): Promise<EaselFailure | undefin
       kind: 'not-configured',
       error: 'Easel 根目录未配置（config.easelRoot 为空）。',
       hint:
-        '在 dsh 配置里为 dsh-easel-orchestrator 设置 config.easelRoot 指向本地 Easel 仓库的绝对路径' +
-        '（该目录下应有 skills/ 与 .env）。可运行 easel_doctor 做一次体检。',
+        '在 dsh 配置里为 dsh-zmtgzt 设置 config.easelRoot 指向本地 Easel 仓库的绝对路径' +
+        '（该目录下应有 skills/ 与 .env）。可运行 zmtgzt_doctor 做一次体检。',
     }
   }
   try {

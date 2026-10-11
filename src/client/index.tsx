@@ -7,15 +7,15 @@
  *   - 项目产物：`outputs/<主题>/` 与 manifest
  *   - 环境体检：Easel 根目录 / 契约文件 / 技能目录 / Python
  *
- * 数据面复用服务端已注册的 /api/easel/* 路由。
- * @module dsh-easel-orchestrator/client
+ * 数据面复用服务端已注册的 /api/zmtgzt/* 路由。
+ * @module dsh-zmtgzt/client
  */
 import { useCallback, useEffect, useState } from 'react'
 
-export const name = 'dsh-easel-orchestrator-client'
+export const name = 'dsh-zmtgzt-client'
 export const inject = ['slots', 'connection', 'locale']
 
-const API = '/api/easel'
+const API = '/api/zmtgzt'
 const TABS = ['技能库', '账号画像', '项目产物', '环境体检'] as const
 type Tab = (typeof TABS)[number]
 
@@ -56,7 +56,7 @@ export function apply(ctx: any) {
     ctx.slots.register(
       {
         name: 'conversation.view',
-        id: 'dsh-easel-orchestrator',
+        id: 'dsh-zmtgzt',
         order: 30,
         label: () => 'Easel 工作台',
         slug: 'easel',
@@ -65,18 +65,18 @@ export function apply(ctx: any) {
           sessionId: String(sessionId ?? ''),
         }),
       },
-      EaselWorkbench
+      ZmtgztWorkbench
     )
   )
 }
 
-function EaselWorkbench() {
+function ZmtgztWorkbench() {
   const [tab, setTab] = useState<Tab>('技能库')
   return (
     <div style={S.root}>
       <header style={S.header}>
         <strong style={{ fontSize: 14 }}>Easel 工作台</strong>
-        <span style={S.version}>dsh-easel-orchestrator</span>
+        <span style={S.version}>dsh-zmtgzt</span>
       </header>
       <nav style={S.tabs}>
         {TABS.map((label) => (
@@ -147,7 +147,7 @@ function SkillsPane() {
       </div>
       <p style={S.muted}>
         技能正文与 references 都在 Easel 仓库里，插件不复制副本。要用某个技能，让 agent 调
-        easel_skill（action=read）。
+        zmtgzt_skill（action=read）。
       </p>
       {shown.map((skill) => (
         <div key={skill.name} style={S.skillRow}>

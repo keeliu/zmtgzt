@@ -1,4 +1,4 @@
-# dsh-easel-orchestrator
+# dsh-zmtgzt
 
 A DeepSeek Harness (dsh) plugin that runs the [Easel](https://github.com/ZJU-REAL/Easel) social-content agent inside dsh.
 
@@ -6,7 +6,7 @@ A DeepSeek Harness (dsh) plugin that runs the [Easel](https://github.com/ZJU-REA
 
 - **Contract injection** — `openclaw/workspace/SOUL.md` and `AGENTS.md` are read from your Easel checkout and registered as a runtime skill, verbatim
 - **Skill registration** — every `skills/openclaw/<name>/SKILL.md` is scanned and registered as a dsh skill, loaded on demand
-- **23 `easel_*` tools** — skill reading, script execution, and the manifest / profile / artifact surfaces
+- **23 `zmtgzt_*` tools** — skill reading, script execution, and the manifest / profile / artifact surfaces
 - **A web view** in the `conversation.view` slot: skill library, account profiles, project artifacts, environment check
 
 ## Install
@@ -14,7 +14,7 @@ A DeepSeek Harness (dsh) plugin that runs the [Easel](https://github.com/ZJU-REA
 ```sh
 git clone https://github.com/ZJU-REAL/Easel   # the official upstream
 
-dsh plugin add dsh-easel-orchestrator
+dsh plugin add dsh-zmtgzt
 ```
 
 Point the plugin at your checkout:
@@ -22,13 +22,13 @@ Point the plugin at your checkout:
 ```yaml
 # in your dsh profile config
 - insert:
-    - id: dsh-easel-orchestrator
-      name: dsh-easel-orchestrator
+    - id: dsh-zmtgzt
+      name: dsh-zmtgzt
       config:
         easelRoot: /absolute/path/to/Easel
 ```
 
-Then run `easel_doctor` to confirm.
+Then run `zmtgzt_doctor` to confirm.
 
 ## Tools
 
@@ -36,7 +36,7 @@ Then run `easel_doctor` to confirm.
 
 | Tool | Purpose |
 | --- | --- |
-| `easel_skill` | `list` all skills (name, layer, blurb) · `read` a SKILL.md body · `files` list its references · `file` read one reference |
+| `zmtgzt_skill` | `list` all skills (name, layer, blurb) · `read` a SKILL.md body · `files` list its references · `file` read one reference |
 
 The Easel repo has ~114 skills. Most of them are **prompt-driven workflows** (a SKILL.md plus `references/`) rather than scripts — the model reads the skill and executes its steps. A minority ship real scripts; those are wrapped below.
 
@@ -44,8 +44,8 @@ The Easel repo has ~114 skills. Most of them are **prompt-driven workflows** (a 
 
 | Tool | Purpose |
 | --- | --- |
-| `easel_run` | Run any Easel script by repo-relative path, with `args` and an optional `subcommand` |
-| `easel_scripts` | List available scripts (`shared`, or per-skill) |
+| `zmtgzt_run` | Run any Easel script by repo-relative path, with `args` and an optional `subcommand` |
+| `zmtgzt_scripts` | List available scripts (`shared`, or per-skill) |
 
 ### Dedicated script tools
 
@@ -53,31 +53,31 @@ Parameters come from the scripts' own `argparse` definitions or from command exa
 
 | Tool | Wraps |
 | --- | --- |
-| `easel_manifest` | `shared/scripts/manifest.py` — the cross-layer handoff (record / meta / read / latest) |
-| `easel_output_paths` | `shared/scripts/output_paths.py` — validate output paths before writing |
-| `easel_model_registry` | `shared/scripts/model_registry.py` — list configured media providers (redacted) |
-| `easel_persona_gate` | `shared/scripts/persona_gate.py` — persona consistency gate before publishing |
-| `easel_content_guard` | `shared/scripts/content_guard.py` — sensitive-content scan before publishing |
-| `easel_publish_log` | `skill-publish-log/scripts/log.py` — publishing record |
-| `easel_news` | `skill-news-intelligence/scripts/` — fetch news / build a briefing |
-| `easel_card_audit` | `card-design/scripts/card_audit.py` — post-render card self-check |
-| `easel_novel_ops` | `novel-writer/scripts/novel_ops.py` — novel scaffolding and progress |
-| `easel_paper_ingest` | `paper-explainer/scripts/paper_ingest.py` — paper fetching and parsing |
-| `easel_data_report` | `data-report/scripts/report.py` — data to HTML report |
-| `easel_assemble_video` | `auto-short-video/scripts/assemble.py` — video assembly |
-| `easel_drama_ops` | `short-drama/scripts/drama_ops.py` — drama assets and progress |
-| `easel_dubbing` | `short-drama/scripts/dubbing.py` — multi-role dubbing |
-| `easel_performance_review` | `skill-social-performance-review/scripts/review.py` |
-| `easel_publish_analytics` | `skill-publish-analytics/scripts/analyze.py` |
-| `easel_assets` | `asset-manager/scripts/assets.py` — asset library |
+| `zmtgzt_manifest` | `shared/scripts/manifest.py` — the cross-layer handoff (record / meta / read / latest) |
+| `zmtgzt_output_paths` | `shared/scripts/output_paths.py` — validate output paths before writing |
+| `zmtgzt_model_registry` | `shared/scripts/model_registry.py` — list configured media providers (redacted) |
+| `zmtgzt_persona_gate` | `shared/scripts/persona_gate.py` — persona consistency gate before publishing |
+| `zmtgzt_content_guard` | `shared/scripts/content_guard.py` — sensitive-content scan before publishing |
+| `zmtgzt_publish_log` | `skill-publish-log/scripts/log.py` — publishing record |
+| `zmtgzt_news` | `skill-news-intelligence/scripts/` — fetch news / build a briefing |
+| `zmtgzt_card_audit` | `card-design/scripts/card_audit.py` — post-render card self-check |
+| `zmtgzt_novel_ops` | `novel-writer/scripts/novel_ops.py` — novel scaffolding and progress |
+| `zmtgzt_paper_ingest` | `paper-explainer/scripts/paper_ingest.py` — paper fetching and parsing |
+| `zmtgzt_data_report` | `data-report/scripts/report.py` — data to HTML report |
+| `zmtgzt_assemble_video` | `auto-short-video/scripts/assemble.py` — video assembly |
+| `zmtgzt_drama_ops` | `short-drama/scripts/drama_ops.py` — drama assets and progress |
+| `zmtgzt_dubbing` | `short-drama/scripts/dubbing.py` — multi-role dubbing |
+| `zmtgzt_performance_review` | `skill-social-performance-review/scripts/review.py` |
+| `zmtgzt_publish_analytics` | `skill-publish-analytics/scripts/analyze.py` |
+| `zmtgzt_assets` | `asset-manager/scripts/assets.py` — asset library |
 
 ### Repository state
 
 | Tool | Purpose |
 | --- | --- |
-| `easel_profile` | Read/write `profiles/<name>/{identity,style,audience,platforms,preferences,memory}.md` |
-| `easel_artifact` | List `outputs/` projects, read a project's manifest and entries |
-| `easel_doctor` | Environment check with per-item fix guidance |
+| `zmtgzt_profile` | Read/write `profiles/<name>/{identity,style,audience,platforms,preferences,memory}.md` |
+| `zmtgzt_artifact` | List `outputs/` projects, read a project's manifest and entries |
+| `zmtgzt_doctor` | Environment check with per-item fix guidance |
 
 ## How the contract reaches the model
 
@@ -105,7 +105,7 @@ The only text the plugin writes itself is a short bridge note explaining these m
 
 ### Without `easelRoot`
 
-Nothing breaks. Script tools return a structured `{ ok: false, kind, error, hint }` value instead of throwing, the contract skill states plainly that `SOUL.md` / `AGENTS.md` were not loaded (rather than substituting a hand-written contract), and `easel_doctor` prints the exact fix.
+Nothing breaks. Script tools return a structured `{ ok: false, kind, error, hint }` value instead of throwing, the contract skill states plainly that `SOUL.md` / `AGENTS.md` were not loaded (rather than substituting a hand-written contract), and `zmtgzt_doctor` prints the exact fix.
 
 ## Development
 

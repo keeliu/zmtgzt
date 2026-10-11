@@ -1,5 +1,5 @@
 /**
- * dsh-easel-orchestrator：把 Easel 接入 DeepSeek Harness。
+ * dsh-zmtgzt：把 Easel 接入 DeepSeek Harness。
  *
  * 本插件**不复制 Easel 的内容**，只做三件接入的事：
  *   1. 契约注入：读 `openclaw/workspace/SOUL.md` + `AGENTS.md`，作为运行时技能注入
@@ -7,12 +7,12 @@
  *   3. 脚本执行：把 Easel 的 Python 脚本包装成工具（skills 下的 scripts 目录），走确定性 IO
  *
  * 画像与产物仍是 Easel 仓库里的 `profiles/` 与 `outputs/`，插件不另存一份。
- * @module dsh-easel-orchestrator
+ * @module dsh-zmtgzt
  */
 import { execFile } from 'node:child_process'
 import type { Context } from '@deepseek-ai/cordis'
-import { PLUGIN_ID, PLUGIN_VERSION, resolveConfig, type EaselConfig } from './config.ts'
-import { EASEL_SHARED_DIR, EASEL_SKILLS_DIR, EASEL_WORKSPACE_DIR, EaselRepo } from './easel-repo.ts'
+import { PLUGIN_ID, PLUGIN_VERSION, resolveConfig, type ZmtgztConfig } from './config.ts'
+import { EASEL_SHARED_DIR, EASEL_SKILLS_DIR, EASEL_WORKSPACE_DIR, EaselRepo } from './repo.ts'
 import { composeContract, skillRegistrationOf } from './orchestration.ts'
 import { createTools } from './tools.ts'
 
@@ -20,10 +20,10 @@ export const name = PLUGIN_ID
 /** 工具注册依赖 tools 服务；skills / webServer 走响应式注入，允许晚于本插件启动。 */
 export const inject = ['tools']
 
-export const HEALTH_PATH = '/api/easel/health'
-const API_PREFIX = '/api/easel'
+export const HEALTH_PATH = '/api/zmtgzt/health'
+const API_PREFIX = '/api/zmtgzt'
 /** 契约技能名——与 Easel 技能名区分开。 */
-const CONTRACT_SKILL = 'easel-orchestrator'
+const CONTRACT_SKILL = 'zmtgzt'
 
 /** 体检要核对的仓库内关键路径。 */
 const REQUIRED_PATHS: Array<{ path: string; label: string }> = [
@@ -34,12 +34,12 @@ const REQUIRED_PATHS: Array<{ path: string; label: string }> = [
   { path: '.env', label: '.env（API key）' },
 ]
 
-export async function apply(ctx: Context, rawConfig?: EaselConfig) {
+export async function apply(ctx: Context, rawConfig?: ZmtgztConfig) {
   const config = resolveConfig(rawConfig)
   const repo = new EaselRepo(config.easelRoot)
   const doctor = () => runDoctor(config, repo)
 
-  ctx.provide('easelRepo', repo)
+  ctx.provide('zmtgztRepo', repo)
 
   // ---- 工具层 ----
   const tools = createTools({ config, repo, doctor })
@@ -139,10 +139,10 @@ async function runDoctor(
       version: PLUGIN_VERSION,
       checks,
       hint:
-        '在 dsh 配置里为 dsh-easel-orchestrator 设置 config.easelRoot，指向本地 Easel 仓库的绝对路径\n' +
+        '在 dsh 配置里为 dsh-zmtgzt 设置 config.easelRoot，指向本地 Easel 仓库的绝对路径\n' +
         '（该目录下应有 openclaw/workspace/AGENTS.md 与 skills/）。\n' +
         '推荐直接从官方仓库获取：git clone https://github.com/ZJU-REAL/Easel\n' +
-        '配置后重新加载插件，再跑一次 easel_doctor。',
+        '配置后重新加载插件，再跑一次 zmtgzt_doctor。',
     }
   }
 
@@ -182,12 +182,12 @@ async function runDoctor(
     skillCount: skills.length,
     checks,
     hint: failed.length === 0
-      ? '环境就绪。可以先 easel_skill（action=list）看技能，再按任务 read 对应技能。'
+      ? '环境就绪。可以先 zmtgzt_skill（action=list）看技能，再按任务 read 对应技能。'
       : [
-          '以下项未通过，逐项修复后重跑 easel_doctor：',
+          '以下项未通过，逐项修复后重跑 zmtgzt_doctor：',
           ...failed.map((c) => `- ${c.name}${c.detail ? `：${c.detail}` : ''}`),
           '',
-          `配置位置：dsh 配置中 dsh-easel-orchestrator 的 config.easelRoot（当前：${root}）`,
+          `配置位置：dsh 配置中 dsh-zmtgzt 的 config.easelRoot（当前：${root}）`,
           'Python 解释器可用 config.pythonPath 覆盖（Windows 常见为 py 或解释器绝对路径）。',
           '若仓库不完整，建议重新 clone 官方仓库：https://github.com/ZJU-REAL/Easel',
         ].join('\n'),

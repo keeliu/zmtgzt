@@ -5,13 +5,13 @@
  * `profiles/<画像>/` 与 `outputs/<主题>/`——那是 AGENTS.md 与各 SKILL 已经约定的磁盘事实，
  * 插件再存一份只会造成两套真相。
  * 插件数据目录只保留自身运行所需的状态。
- * @module dsh-easel-orchestrator/config
+ * @module dsh-zmtgzt/config
  */
 import { homedir } from 'node:os'
 import { isAbsolute, join, resolve } from 'node:path'
 
 /** 插件标识，同时用作 dsh 数据目录名。 */
-export const PLUGIN_ID = 'dsh-easel-orchestrator'
+export const PLUGIN_ID = 'dsh-zmtgzt'
 
 declare const __EASEL_VERSION__: string
 export const PLUGIN_VERSION = typeof __EASEL_VERSION__ === 'undefined' ? 'dev' : __EASEL_VERSION__
@@ -22,7 +22,7 @@ export function dshHome(): string {
 }
 
 /** 插件运行期配置。 */
-export interface EaselConfig {
+export interface ZmtgztConfig {
   /** 本地 Easel 仓库根目录（含 openclaw/ 与 skills/）。未配置时工具优雅降级。 */
   easelRoot?: string
   /** Python 解释器。默认 python。 */
@@ -49,7 +49,7 @@ export interface ResolvedConfig {
   dataDir: string
 }
 
-export function resolveConfig(input: EaselConfig | undefined): ResolvedConfig {
+export function resolveConfig(input: ZmtgztConfig | undefined): ResolvedConfig {
   return {
     easelRoot: absolutize(input?.easelRoot),
     pythonPath: input?.pythonPath?.trim() || process.env.EASEL_PYTHON?.trim() || 'python',

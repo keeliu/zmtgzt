@@ -1,4 +1,4 @@
-# dsh-easel-orchestrator
+# dsh-zmtgzt
 
 把 [Easel](https://github.com/ZJU-REAL/Easel)（开源社媒内容智能体）接进 DeepSeek Harness 的 dsh 插件。
 
@@ -6,7 +6,7 @@
 
 - **契约注入**——从你的 Easel 仓库读 `openclaw/workspace/SOUL.md` 与 `AGENTS.md`，**原文**注册为运行时技能
 - **技能注册**——扫描 `skills/openclaw/<技能名>/SKILL.md`，逐个注册为 dsh 技能，按需加载
-- **23 个 `easel_*` 工具**——技能读取、脚本执行、manifest / 画像 / 产物三类状态入口
+- **23 个 `zmtgzt_*` 工具**——技能读取、脚本执行、manifest / 画像 / 产物三类状态入口
 - **Web 视图**（`conversation.view` 槽）：技能库、账号画像、项目产物、环境体检
 
 ## 安装
@@ -14,7 +14,7 @@
 ```sh
 git clone https://github.com/ZJU-REAL/Easel   # 官方上游
 
-dsh plugin add dsh-easel-orchestrator
+dsh plugin add dsh-zmtgzt
 ```
 
 把插件指向你的仓库：
@@ -22,13 +22,13 @@ dsh plugin add dsh-easel-orchestrator
 ```yaml
 # 在 dsh profile 配置里
 - insert:
-    - id: dsh-easel-orchestrator
-      name: dsh-easel-orchestrator
+    - id: dsh-zmtgzt
+      name: dsh-zmtgzt
       config:
         easelRoot: /绝对路径/Easel
 ```
 
-然后跑一次 `easel_doctor` 确认。
+然后跑一次 `zmtgzt_doctor` 确认。
 
 ## 工具
 
@@ -36,7 +36,7 @@ dsh plugin add dsh-easel-orchestrator
 
 | 工具 | 用途 |
 | --- | --- |
-| `easel_skill` | `list` 列出全部技能（名称/层/简介）· `read` 读 SKILL.md 正文 · `files` 列 references · `file` 读某个 reference |
+| `zmtgzt_skill` | `list` 列出全部技能（名称/层/简介）· `read` 读 SKILL.md 正文 · `files` 列 references · `file` 读某个 reference |
 
 Easel 有约 114 个技能，其中**大多数是提示词驱动的流程**（一份 SKILL.md + `references/`），由模型读流程后执行；少数自带脚本，见下。
 
@@ -44,8 +44,8 @@ Easel 有约 114 个技能，其中**大多数是提示词驱动的流程**（�
 
 | 工具 | 用途 |
 | --- | --- |
-| `easel_run` | 按仓库相对路径执行任意 Easel 脚本，支持 `args` 与 `subcommand` |
-| `easel_scripts` | 列出可用脚本（共享脚本 / 各技能自带脚本） |
+| `zmtgzt_run` | 按仓库相对路径执行任意 Easel 脚本，支持 `args` 与 `subcommand` |
+| `zmtgzt_scripts` | 列出可用脚本（共享脚本 / 各技能自带脚本） |
 
 ### 专用脚本工具
 
@@ -53,31 +53,31 @@ Easel 有约 114 个技能，其中**大多数是提示词驱动的流程**（�
 
 | 工具 | 包装的脚本 |
 | --- | --- |
-| `easel_manifest` | `shared/scripts/manifest.py`——跨层传递契约（record / meta / read / latest） |
-| `easel_output_paths` | `shared/scripts/output_paths.py`——写入前校验产物路径 |
-| `easel_model_registry` | `shared/scripts/model_registry.py`——查询已配置的媒体 provider（脱敏） |
-| `easel_persona_gate` | `shared/scripts/persona_gate.py`——发布前人设一致性检查 |
-| `easel_content_guard` | `shared/scripts/content_guard.py`——发布前敏感信息扫描 |
-| `easel_publish_log` | `skill-publish-log/scripts/log.py`——发布留痕 |
-| `easel_news` | `skill-news-intelligence/scripts/`——资讯抓取 / 日报 |
-| `easel_card_audit` | `card-design/scripts/card_audit.py`——卡片渲染后自检 |
-| `easel_novel_ops` | `novel-writer/scripts/novel_ops.py`——小说搭骨架与进度 |
-| `easel_paper_ingest` | `paper-explainer/scripts/paper_ingest.py`——论文抓取与解析 |
-| `easel_data_report` | `data-report/scripts/report.py`——数据生成报告页 |
-| `easel_assemble_video` | `auto-short-video/scripts/assemble.py`——视频合成 |
-| `easel_drama_ops` | `short-drama/scripts/drama_ops.py`——短剧资产与进度 |
-| `easel_dubbing` | `short-drama/scripts/dubbing.py`——多角色配音 |
-| `easel_performance_review` | `skill-social-performance-review/scripts/review.py` |
-| `easel_publish_analytics` | `skill-publish-analytics/scripts/analyze.py` |
-| `easel_assets` | `asset-manager/scripts/assets.py`——素材库 |
+| `zmtgzt_manifest` | `shared/scripts/manifest.py`——跨层传递契约（record / meta / read / latest） |
+| `zmtgzt_output_paths` | `shared/scripts/output_paths.py`——写入前校验产物路径 |
+| `zmtgzt_model_registry` | `shared/scripts/model_registry.py`——查询已配置的媒体 provider（脱敏） |
+| `zmtgzt_persona_gate` | `shared/scripts/persona_gate.py`——发布前人设一致性检查 |
+| `zmtgzt_content_guard` | `shared/scripts/content_guard.py`——发布前敏感信息扫描 |
+| `zmtgzt_publish_log` | `skill-publish-log/scripts/log.py`——发布留痕 |
+| `zmtgzt_news` | `skill-news-intelligence/scripts/`——资讯抓取 / 日报 |
+| `zmtgzt_card_audit` | `card-design/scripts/card_audit.py`——卡片渲染后自检 |
+| `zmtgzt_novel_ops` | `novel-writer/scripts/novel_ops.py`——小说搭骨架与进度 |
+| `zmtgzt_paper_ingest` | `paper-explainer/scripts/paper_ingest.py`——论文抓取与解析 |
+| `zmtgzt_data_report` | `data-report/scripts/report.py`——数据生成报告页 |
+| `zmtgzt_assemble_video` | `auto-short-video/scripts/assemble.py`——视频合成 |
+| `zmtgzt_drama_ops` | `short-drama/scripts/drama_ops.py`——短剧资产与进度 |
+| `zmtgzt_dubbing` | `short-drama/scripts/dubbing.py`——多角色配音 |
+| `zmtgzt_performance_review` | `skill-social-performance-review/scripts/review.py` |
+| `zmtgzt_publish_analytics` | `skill-publish-analytics/scripts/analyze.py` |
+| `zmtgzt_assets` | `asset-manager/scripts/assets.py`——素材库 |
 
 ### 仓库状态
 
 | 工具 | 用途 |
 | --- | --- |
-| `easel_profile` | 读写 `profiles/<画像>/{identity,style,audience,platforms,preferences,memory}.md` |
-| `easel_artifact` | 列出 `outputs/` 项目，读某个项目的 manifest 与产物 |
-| `easel_doctor` | 环境体检，逐项给出修复指引 |
+| `zmtgzt_profile` | 读写 `profiles/<画像>/{identity,style,audience,platforms,preferences,memory}.md` |
+| `zmtgzt_artifact` | 列出 `outputs/` 项目，读某个项目的 manifest 与产物 |
+| `zmtgzt_doctor` | 环境体检，逐项给出修复指引 |
 
 ## 契约如何送达模型
 
@@ -105,7 +105,7 @@ Easel 的 prompt stack 是四层（见其 `docs/prompt-stack.md`）。dsh 没有
 
 ### 未配置 `easelRoot` 时
 
-不会坏。脚本工具返回结构化的 `{ ok: false, kind, error, hint }` 而不是抛异常；契约技能会**明确声明** SOUL.md / AGENTS.md 未加载（而不是塞一份手写的替代品）；`easel_doctor` 打印出确切的修复步骤。
+不会坏。脚本工具返回结构化的 `{ ok: false, kind, error, hint }` 而不是抛异常；契约技能会**明确声明** SOUL.md / AGENTS.md 未加载（而不是塞一份手写的替代品）；`zmtgzt_doctor` 打印出确切的修复步骤。
 
 ## 开发
 

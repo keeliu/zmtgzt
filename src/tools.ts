@@ -5,18 +5,18 @@
  *   Easel 的 114 个技能里，**绝大多数是给 LLM 执行的提示词流程**（SKILL.md + references/），
  *   只有约 35 个技能带可执行脚本。因此本插件不再"一个技能包一个脚本工具"，
  *   而是分成三类：
- *     1. 技能读取（easel_skill）——把 Easel 技能正文与 references 取给模型，按 SKILL.md 执行
- *     2. 脚本执行（easel_run + 若干专用工具）——只包装仓库里真实存在的脚本
+ *     1. 技能读取（zmtgzt_skill）——把 Easel 技能正文与 references 取给模型，按 SKILL.md 执行
+ *     2. 脚本执行（zmtgzt_run + 若干专用工具）——只包装仓库里真实存在的脚本
  *     3. 仓库状态读写（manifest / profile / artifact）
  *   全部参数以 Easel 源码中的 argparse 与 AGENTS.md 的命令示例为准，不臆造。
- * @module dsh-easel-orchestrator/tools
+ * @module dsh-zmtgzt/tools
  */
 import { mkdir, readdir, readFile, writeFile } from 'node:fs/promises'
 import { dirname } from 'node:path'
 import { defineTool } from '@deepseek-ai/dsh-tools'
 import type { ResolvedConfig } from './config.ts'
 import { failureText, isEaselFailure, runEaselScript, type ScriptArgs } from './runner.ts'
-import type { EaselRepo } from './easel-repo.ts'
+import type { EaselRepo } from './repo.ts'
 
 /** 工具运行期依赖。 */
 export interface ToolDeps {
@@ -140,7 +140,7 @@ export function createTools(deps: ToolDeps) {
     // 1. 技能读取：Easel 的技能正文与 references 都从磁盘取，不在插件里复制
     // -----------------------------------------------------------------------
     defineTool({
-      name: 'easel_skill',
+      name: 'zmtgzt_skill',
       description:
         '读取 Easel 仓库里的技能。action=list 列出全部技能（名称、所属层、简介）；' +
         'action=read 取某个 SKILL.md 正文（执行流程）；action=files 列出该技能的 references/；' +
@@ -210,12 +210,12 @@ export function createTools(deps: ToolDeps) {
     // 2. 脚本执行
     // -----------------------------------------------------------------------
     defineTool({
-      name: 'easel_run',
+      name: 'zmtgzt_run',
       description:
         '执行 Easel 仓库里的任意脚本（确定性 IO 的通用出口）。传根相对路径，例如 ' +
         'skills/shared/scripts/manifest.py。参数走 args（键值对，透传为 --key value）；' +
         'argparse 子命令用 subcommand。参数名以脚本 --help 为准，不要臆造。' +
-        '想先看有哪些脚本用 easel_scripts。',
+        '想先看有哪些脚本用 zmtgzt_scripts。',
       parameters: {
         script: sr('根相对脚本路径，如 skills/shared/scripts/output_paths.py'),
         subcommand: s('argparse 子命令，如 record / meta / read / latest'),
@@ -236,10 +236,10 @@ export function createTools(deps: ToolDeps) {
     }),
 
     defineTool({
-      name: 'easel_scripts',
+      name: 'zmtgzt_scripts',
       description:
         '列出 Easel 仓库里可执行的脚本：action=shared 列出 skills/shared/scripts 下的通用脚本；' +
-        'action=skills 列出各技能自带的 scripts/。要执行其中任何一个用 easel_run。',
+        'action=skills 列出各技能自带的 scripts/。要执行其中任何一个用 zmtgzt_run。',
       parameters: {
         action: e(['shared', 'skills'], '列出范围', true),
       },
@@ -268,7 +268,7 @@ export function createTools(deps: ToolDeps) {
     // 3. 专用脚本工具：参数取自源码 argparse 或 AGENTS.md 的命令示例
     // -----------------------------------------------------------------------
     scriptTool(deps, {
-      name: 'easel_manifest',
+      name: 'zmtgzt_manifest',
       description:
         '编排产物登记（AGENTS.md 规定的跨层传递契约）：把"产物路径 + 一句结论"写进 manifest，' +
         '下游先 read/latest 读上游，不重新推导。跨两层以上任务必用。',
@@ -299,7 +299,7 @@ export function createTools(deps: ToolDeps) {
     }),
 
     scriptTool(deps, {
-      name: 'easel_output_paths',
+      name: 'zmtgzt_output_paths',
       description:
         '校验并规整产物路径（AGENTS.md 要求写入前先校验）：禁止泛化主题名、禁止产物散落在 outputs/ 根目录。' +
         '返回规范化后的绝对路径，越界或命名不合规会被拒绝。',
@@ -312,7 +312,7 @@ export function createTools(deps: ToolDeps) {
     }),
 
     scriptTool(deps, {
-      name: 'easel_model_registry',
+      name: 'zmtgzt_model_registry',
       description:
         '脱敏查询已配置的媒体模型 provider（AGENTS.md 规定：调用视频/音乐/云 TTS 前必须先查）。' +
         '只返回"必填凭证齐全"的 provider，不暴露 Key。',
@@ -327,7 +327,7 @@ export function createTools(deps: ToolDeps) {
     }),
 
     scriptTool(deps, {
-      name: 'easel_persona_gate',
+      name: 'zmtgzt_persona_gate',
       description:
         '人设一致性门禁（AGENTS.md 规定发布前必做）：action=check 用评分判定 pass/warn；' +
         'action=record 记录留痕。注意：只提醒、不阻断发布，内容安全硬门禁独立生效。',
@@ -346,7 +346,7 @@ export function createTools(deps: ToolDeps) {
     }),
 
     scriptTool(deps, {
-      name: 'easel_content_guard',
+      name: 'zmtgzt_content_guard',
       description:
         '发布前敏感信息扫描（AGENTS.md 规定的硬门禁）：扫描文案中的 API Key、内部 URL、代理、' +
         '内部绝对路径等。命中会以退出码 7 结束，属于预期的拦截而非脚本故障。',
@@ -362,7 +362,7 @@ export function createTools(deps: ToolDeps) {
     }),
 
     scriptTool(deps, {
-      name: 'easel_publish_log',
+      name: 'zmtgzt_publish_log',
       description: '发布留痕（AGENTS.md 规定的发布后动作）：记录平台、标题、画像与人设检查结论。',
       parameters: {
         platform: sr('平台'),
@@ -378,11 +378,11 @@ export function createTools(deps: ToolDeps) {
     }),
 
     scriptTool(deps, {
-      name: 'easel_news',
+      name: 'zmtgzt_news',
       description:
         '行业资讯聚合（skill-news-intelligence 的脚本）：action=fetch 抓取资讯源；' +
         'action=briefing 生成日报。注意与热点技能 skill-trending-topics 的区别——' +
-        '后者是分钟级热搜、纯流程技能（用 easel_skill 读取后按流程执行）。',
+        '后者是分钟级热搜、纯流程技能（用 zmtgzt_skill 读取后按流程执行）。',
       parameters: {
         action: e(['fetch', 'briefing'], '子命令', true),
         source: s('资讯源或关键词'),
@@ -397,7 +397,7 @@ export function createTools(deps: ToolDeps) {
     }),
 
     scriptTool(deps, {
-      name: 'easel_card_audit',
+      name: 'zmtgzt_card_audit',
       description: '卡片渲染后的自检（card-design 规定的第五步）：检查渲染结果是否达标。',
       parameters: {
         path: sr('待审计的卡片文件或目录路径'),
@@ -409,7 +409,7 @@ export function createTools(deps: ToolDeps) {
     }),
 
     scriptTool(deps, {
-      name: 'easel_novel_ops',
+      name: 'zmtgzt_novel_ops',
       description:
         '小说连载的确定性 IO（novel-writer 的技能规定"文件即真相"）：立项搭骨架、进度管理、AI 味检查等。' +
         '创意写作本身由你按 SKILL.md 完成，不走脚本。',
@@ -426,7 +426,7 @@ export function createTools(deps: ToolDeps) {
     }),
 
     scriptTool(deps, {
-      name: 'easel_paper_ingest',
+      name: 'zmtgzt_paper_ingest',
       description:
         '论文抓取与解析（paper-explainer）：拉取原文、解析 PDF、产出可复用的 asset library。' +
         '解析只做一次，视频与图文两条产线共用。',
@@ -442,7 +442,7 @@ export function createTools(deps: ToolDeps) {
     }),
 
     scriptTool(deps, {
-      name: 'easel_data_report',
+      name: 'zmtgzt_data_report',
       description: '把数据文件生成可视化报告页（data-report）。',
       parameters: {
         input: sr('数据文件路径（CSV / Excel / JSON）'),
@@ -455,7 +455,7 @@ export function createTools(deps: ToolDeps) {
     }),
 
     scriptTool(deps, {
-      name: 'easel_assemble_video',
+      name: 'zmtgzt_assemble_video',
       description:
         '短视频合成合流点（auto-short-video 的技能规定合成前硬拦截只有 frame 没有 clip 的镜头）。',
       parameters: {
@@ -470,7 +470,7 @@ export function createTools(deps: ToolDeps) {
     }),
 
     scriptTool(deps, {
-      name: 'easel_drama_ops',
+      name: 'zmtgzt_drama_ops',
       description: '短剧资产 / 分镜 / 进度管理（short-drama）。',
       parameters: {
         action: sr('子命令，取值以脚本 --help 为准'),
@@ -484,7 +484,7 @@ export function createTools(deps: ToolDeps) {
     }),
 
     scriptTool(deps, {
-      name: 'easel_dubbing',
+      name: 'zmtgzt_dubbing',
       description: '短剧多角色配音（short-drama 规定配音必须用云 provider，edge 兜底会被硬拦截）。',
       parameters: {
         topic: sr('主题名'),
@@ -497,7 +497,7 @@ export function createTools(deps: ToolDeps) {
     }),
 
     scriptTool(deps, {
-      name: 'easel_performance_review',
+      name: 'zmtgzt_performance_review',
       description: '发布后复盘（skill-social-performance-review）。',
       parameters: {
         topic: s('主题名'),
@@ -510,7 +510,7 @@ export function createTools(deps: ToolDeps) {
     }),
 
     scriptTool(deps, {
-      name: 'easel_publish_analytics',
+      name: 'zmtgzt_publish_analytics',
       description: '发布数据分析与粉丝记录（skill-publish-analytics）。',
       parameters: {
         platform: s('平台'),
@@ -522,7 +522,7 @@ export function createTools(deps: ToolDeps) {
     }),
 
     scriptTool(deps, {
-      name: 'easel_assets',
+      name: 'zmtgzt_assets',
       description: '素材库管理（asset-manager）：登记与检索 assets/ 下的用户素材。',
       parameters: {
         action: sr('子命令，取值以脚本 --help 为准'),
@@ -539,7 +539,7 @@ export function createTools(deps: ToolDeps) {
     // 4. 仓库状态：画像与产物
     // -----------------------------------------------------------------------
     defineTool({
-      name: 'easel_profile',
+      name: 'zmtgzt_profile',
       description:
         '读写账号画像（Easel 的 profiles/<画像>/，六维各一个 md：identity / style / audience / ' +
         'platforms / preferences / memory）。action=list 列出全部画像；action=read 读一个画像的全部维度；' +
@@ -601,10 +601,10 @@ export function createTools(deps: ToolDeps) {
     }),
 
     defineTool({
-      name: 'easel_artifact',
+      name: 'zmtgzt_artifact',
       description:
         '查看产物状态：action=list 列出 outputs/ 下全部项目；action=read 读某项目的 manifest 与产物目录树。' +
-        'manifest 由 easel_manifest 写入，是跨技能传递的真相来源。',
+        'manifest 由 zmtgzt_manifest 写入，是跨技能传递的真相来源。',
       parameters: {
         action: e(['list', 'read'], '操作类型', true),
         topic: s('主题名（read 时必填）'),
@@ -647,10 +647,10 @@ export function createTools(deps: ToolDeps) {
     // 5. 环境体检
     // -----------------------------------------------------------------------
     defineTool({
-      name: 'easel_doctor',
+      name: 'zmtgzt_doctor',
       description:
         '插件与环境体检：检查 Easel 根目录、SOUL.md / AGENTS.md、技能目录、Python 解释器、.env 与共享脚本，' +
-        '并给出逐项修复指引。调用其它 easel_* 工具前不确定环境是否就绪时先跑这个。',
+        '并给出逐项修复指引。调用其它 zmtgzt_* 工具前不确定环境是否就绪时先跑这个。',
       parameters: {},
       output: {
         schema: { type: 'json' } as never,
@@ -675,8 +675,8 @@ function notConfigured(what: string): Record<string, unknown> {
     kind: 'not-configured',
     error: `未配置 Easel 根目录，无法${what}。`,
     hint:
-      '在 dsh 配置中为 dsh-easel-orchestrator 设置 config.easelRoot，指向本地 Easel 仓库绝对路径；' +
-      '配置后运行 easel_doctor 确认。',
+      '在 dsh 配置中为 dsh-zmtgzt 设置 config.easelRoot，指向本地 Easel 仓库绝对路径；' +
+      '配置后运行 zmtgzt_doctor 确认。',
   }
 }
 

@@ -9,7 +9,7 @@
  *
  * 这样 Easel 升级后插件自动跟上，不会出现"插件里的旧契约"与
  * "仓库里的新契约"各说一套。
- * @module dsh-easel-orchestrator/easel-repo
+ * @module dsh-zmtgzt/easel-repo
  */
 import { readdir, readFile, stat } from 'node:fs/promises'
 import { existsSync } from 'node:fs'

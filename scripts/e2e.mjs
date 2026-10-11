@@ -5,7 +5,7 @@
  *   1. 契约是否**逐字**来自仓库的 SOUL.md / AGENTS.md（证明插件没改写、没编造）
  *   2. 技能是否从 SKILL.md 的 frontmatter 正确解析并注册
  *   3. 脚本执行：cwd、argparse 子命令、flag 透传、stdout JSON 解析
- *   4. easel_skill 是否能取到技能正文与 references
+ *   4. zmtgzt_skill 是否能取到技能正文与 references
  *   5. 画像读写是否落在 profiles/<名字>/
  *   6. 产物枚举是否读 outputs/
  *
@@ -172,7 +172,7 @@ const signal = new AbortController().signal
 const call = (name, args = {}) => registered.get(name).execute(args, { signal })
 
 console.log('\n[A] 契约逐字来自仓库')
-const contract = skills.find((s) => s.name === 'easel-orchestrator')
+const contract = skills.find((s) => s.name === 'zmtgzt')
 check('契约技能已注册', Boolean(contract))
 check('SOUL.md 原文被完整纳入', String(contract?.content).includes(SOUL_MARKER.trim()))
 check('AGENTS.md 原文被完整纳入', String(contract?.content).includes(AGENTS_MARKER.trim()))
@@ -180,76 +180,76 @@ check('未出现插件自造的"五层分工"表述', !String(contract?.content)
 check('附带了插件接入说明', String(contract?.content).includes('本插件的接入方式'))
 
 console.log('\n[B] 技能扫描与注册')
-const easelSkills = skills.filter((s) => s.name !== 'easel-orchestrator')
+const easelSkills = skills.filter((s) => s.name !== 'zmtgzt')
 check('扫到 2 个 Easel 技能', easelSkills.length === 2, easelSkills.map((s) => s.name).join(', '))
 const alpha = easelSkills.find((s) => s.name === 'skill-alpha')
 check('折叠块 description 被合并为一行', String(alpha?.description).includes('第一个演示技能') && String(alpha?.description).includes('演示 A'))
 check('description 不含折叠标记', !String(alpha?.description).includes('>-'))
 
-const listResult = await call('easel_skill', { action: 'list' })
-check('easel_skill list 成功', listResult.ok === true && listResult.total === 2, `total=${listResult.total}`)
+const listResult = await call('zmtgzt_skill', { action: 'list' })
+check('zmtgzt_skill list 成功', listResult.ok === true && listResult.total === 2, `total=${listResult.total}`)
 check('list 带 layer 信息', listResult.skills?.some((s) => s.layer === 'discover'))
 
-const readResult = await call('easel_skill', { action: 'read', name: 'skill-alpha' })
-check('easel_skill read 取到正文', String(readResult.body).includes('# 演示技能 A'))
+const readResult = await call('zmtgzt_skill', { action: 'read', name: 'skill-alpha' })
+check('zmtgzt_skill read 取到正文', String(readResult.body).includes('# 演示技能 A'))
 check('read 列出 references', Array.isArray(readResult.references) && readResult.references.includes('references/hook.md'))
 check('frontmatter 未混入正文', !String(readResult.body).includes('name: skill-alpha'))
 
-const fileResult = await call('easel_skill', { action: 'file', name: 'skill-alpha', file: 'references/hook.md' })
-check('easel_skill file 读到 reference', String(fileResult.content).includes('Hook 库'))
-const escapeAttempt = await call('easel_skill', { action: 'file', name: 'skill-alpha', file: '../../../../etc/passwd' })
+const fileResult = await call('zmtgzt_skill', { action: 'file', name: 'skill-alpha', file: 'references/hook.md' })
+check('zmtgzt_skill file 读到 reference', String(fileResult.content).includes('Hook 库'))
+const escapeAttempt = await call('zmtgzt_skill', { action: 'file', name: 'skill-alpha', file: '../../../../etc/passwd' })
 check('references 读取阻断路径穿越', escapeAttempt.ok === false)
 
 console.log('\n[C] 脚本执行')
-const scripts = await call('easel_scripts', { action: 'skills' })
-check('easel_scripts 列出带脚本的技能', scripts.skills?.some((s) => s.skill === 'skill-beta'))
+const scripts = await call('zmtgzt_scripts', { action: 'skills' })
+check('zmtgzt_scripts 列出带脚本的技能', scripts.skills?.some((s) => s.skill === 'skill-beta'))
 check('脚本路径为根相对', String(scripts.skills?.find((s) => s.skill === 'skill-beta')?.scripts[0]).startsWith('skills/openclaw/skill-beta/scripts/'))
 
-const ran = await call('easel_run', {
+const ran = await call('zmtgzt_run', {
   script: 'skills/openclaw/skill-beta/scripts/echo.py',
   subcommand: 'record',
   args: { topic: '春季通勤穿搭', layer: 'produce', skill: 'skill-beta' },
 })
-check('easel_run 调用成功', ran.ok === true, JSON.stringify(ran).slice(0, 100))
+check('zmtgzt_run 调用成功', ran.ok === true, JSON.stringify(ran).slice(0, 100))
 check('cwd 切到 Easel 根', ran.data?.cwd === easelRoot, ran.data?.cwd)
 check('能读到 .env', ran.data?.envVisible === true)
 check('argparse 子命令正确传递', ran.data?.cmd === 'record', String(ran.data?.cmd))
 check('flag 正确传递', ran.data?.topic === '春季通勤穿搭' && ran.data?.layer === 'produce')
 
-const ranRead = await call('easel_run', {
+const ranRead = await call('zmtgzt_run', {
   script: 'skills/openclaw/skill-beta/scripts/echo.py',
   subcommand: 'read',
   args: { topic: '测试' },
 })
 check('切换子命令正常', ranRead.data?.cmd === 'read', String(ranRead.data?.cmd))
 
-const missing = await call('easel_run', { script: 'skills/shared/scripts/not-there.py', args: {} })
+const missing = await call('zmtgzt_run', { script: 'skills/shared/scripts/not-there.py', args: {} })
 check('脚本缺失返回结构化失败面', missing.ok === false && missing.kind === 'script-missing', missing.kind)
 
-const traversal = await call('easel_run', { script: '../../etc/passwd', args: {} })
+const traversal = await call('zmtgzt_run', { script: '../../etc/passwd', args: {} })
 check('脚本路径穿越被阻断', traversal.ok === false && traversal.kind === 'script-missing', traversal.kind)
 
 console.log('\n[D] 画像读写（落在 Easel 的 profiles/）')
-const profileList = await call('easel_profile', { action: 'list' })
+const profileList = await call('zmtgzt_profile', { action: 'list' })
 check('列出已有画像', profileList.profiles?.includes('测试账号'), JSON.stringify(profileList.profiles))
 check('_template 被过滤', !profileList.profiles?.includes('_template'))
 
-const profileRead = await call('easel_profile', { action: 'read', name: '测试账号' })
+const profileRead = await call('zmtgzt_profile', { action: 'read', name: '测试账号' })
 check('读到画像维度', String(profileRead.dimensions?.identity).includes('职场干货博主'))
 
-await call('easel_profile', { action: 'write', name: '测试账号', file: 'style', content: '# 风格\n口语化\n' })
+await call('zmtgzt_profile', { action: 'write', name: '测试账号', file: 'style', content: '# 风格\n口语化\n' })
 const onDisk = readFileSync(join(easelRoot, 'profiles/测试账号/style.md'), 'utf8')
 check('写入落在 profiles/<名字>/style.md', onDisk.includes('口语化'))
 
 console.log('\n[E] 产物枚举（读 outputs/）')
-const artifacts = await call('easel_artifact', { action: 'list' })
+const artifacts = await call('zmtgzt_artifact', { action: 'list' })
 check('列出产物项目', artifacts.projects?.includes('春季通勤穿搭'))
-const detail = await call('easel_artifact', { action: 'read', topic: '春季通勤穿搭' })
+const detail = await call('zmtgzt_artifact', { action: 'read', topic: '春季通勤穿搭' })
 check('读到 manifest', detail.manifest?.steps?.[0]?.skill === 'skill-beta')
 check('列出产物文件', detail.entries?.some((e) => e.name === 'manifest.json'))
 
 console.log('\n[F] 环境体检')
-const diagnosis = await call('easel_doctor')
+const diagnosis = await call('zmtgzt_doctor')
 check('判定环境就绪', diagnosis.healthy === true, JSON.stringify(diagnosis.checks?.filter((c) => !c.ok)))
 check('统计到技能数', diagnosis.skillCount === 2, String(diagnosis.skillCount))
 

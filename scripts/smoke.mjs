@@ -45,7 +45,7 @@ const mod = await import(join(root, 'lib/index.js')).catch((error) => {
 })
 
 console.log('\n[1] 模块导出')
-check('export name', mod.name === 'dsh-easel-orchestrator', mod.name)
+check('export name', mod.name === 'dsh-zmtgzt', mod.name)
 check('export inject', Array.isArray(mod.inject) && mod.inject.includes('tools'), JSON.stringify(mod.inject))
 check('export apply', typeof mod.apply === 'function')
 
@@ -72,7 +72,7 @@ const ctx = {
 await mod.apply(ctx, { easelRoot: '/tmp/definitely-not-a-real-easel-root' })
 
 check('工具数量', registered.size === EXPECTED_TOOLS, `${registered.size} / ${EXPECTED_TOOLS}`)
-check('工具名均为 easel_ 前缀', [...registered.keys()].every((n) => n.startsWith('easel_')))
+check('工具名均为 zmtgzt_ 前缀', [...registered.keys()].every((n) => n.startsWith('zmtgzt_')))
 const malformed = [...registered.values()].filter(
   (t) => typeof t.name !== 'string' || typeof t.description !== 'string' ||
     typeof t.execute !== 'function' || !t.output?.schema || typeof t.output.render !== 'function'
@@ -82,7 +82,7 @@ check('工具定义结构完整', malformed.length === 0, malformed.map((t) => t
 console.log('\n[3] 契约为空时的降级（路径不存在）')
 check('注册了契约技能', skills.length === 1, `${skills.length} 个：${skills.map((s) => s.name).join(', ')}`)
 const contract = skills[0]
-check('契约技能名为 easel-orchestrator', contract?.name === 'easel-orchestrator', contract?.name)
+check('契约技能名为 zmtgzt', contract?.name === 'zmtgzt', contract?.name)
 check('契约正文声明未加载', String(contract?.content).includes('未加载'), '含"未加载"')
 check('契约给出配置指引', String(contract?.content).includes('easelRoot'))
 check('契约未编造 Easel 内容', !String(contract?.content).includes('五层分工'))
@@ -91,24 +91,24 @@ console.log('\n[4] 插件不打包 Easel 内容')
 check('插件内无 skills/ 目录', !existsSync(join(root, 'skills')))
 
 console.log('\n[5] 共享服务与路由')
-check('ctx.provide easelRepo', Boolean(provided.get('easelRepo')))
-check('注册 /api/easel 路由', routes.length >= 6, `${routes.length} 条`)
-check('健康检查路由存在', routes.some((r) => r.path === '/api/easel/health'))
+check('ctx.provide zmtgztRepo', Boolean(provided.get('zmtgztRepo')))
+check('注册 /api/zmtgzt 路由', routes.length >= 6, `${routes.length} 条`)
+check('健康检查路由存在', routes.some((r) => r.path === '/api/zmtgzt/health'))
 
 console.log('\n[6] 未配置时的工具行为')
-const doctor = registered.get('easel_doctor')
+const doctor = registered.get('zmtgzt_doctor')
 const diagnosis = await doctor.execute({}, { signal: new AbortController().signal })
-check('easel_doctor 不抛异常', diagnosis?.healthy === false)
+check('zmtgzt_doctor 不抛异常', diagnosis?.healthy === false)
 check('doctor 指引含官方仓库地址', String(diagnosis.hint).includes('ZJU-REAL/Easel'))
 
-const skillTool = registered.get('easel_skill')
+const skillTool = registered.get('zmtgzt_skill')
 const listed = await skillTool.execute({ action: 'list' }, { signal: new AbortController().signal })
-check('easel_skill 返回未配置错误', listed.ok === false, listed.kind)
+check('zmtgzt_skill 返回未配置错误', listed.ok === false, listed.kind)
 check('错误带 hint', typeof listed.hint === 'string' && listed.hint.includes('easelRoot'))
 
-const run = registered.get('easel_run')
+const run = registered.get('zmtgzt_run')
 const ran = await run.execute({ script: 'skills/shared/scripts/manifest.py', args: {} }, { signal: new AbortController().signal })
-check('easel_run 返回结构化失败面', ran.ok === false, ran.kind)
+check('zmtgzt_run 返回结构化失败面', ran.ok === false, ran.kind)
 
 console.log('')
 if (failures.length > 0) {

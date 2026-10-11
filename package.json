@@ -1,7 +1,7 @@
 {
-  "name": "dsh-easel-orchestrator",
+  "name": "dsh-zmtgzt",
   "version": "0.1.0",
-  "description": "DeepSeek Harness plugin that runs the Easel social-content agent inside dsh. Ships no Easel content: the SOUL.md + AGENTS.md contract and every skills/openclaw SKILL.md are read from a local Easel checkout at runtime, so nothing drifts from upstream. Registers 23 easel_* tools for skill reading, script execution, and manifest/profile/artifact state, plus a web view in the conversation.view slot.",
+  "description": "DeepSeek Harness plugin that runs the Easel social-content agent inside dsh. Ships no Easel content: the SOUL.md + AGENTS.md contract and every skills/openclaw SKILL.md are read from a local Easel checkout at runtime, so nothing drifts from upstream. Registers 23 zmtgzt_* tools for skill reading, script execution, and manifest/profile/artifact state, plus a web view in the conversation.view slot.",
   "license": "MIT",
   "type": "module",
   "main": "lib/index.js",

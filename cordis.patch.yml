@@ -1,17 +1,17 @@
-# dsh-easel-orchestrator 插件行
+# dsh-zmtgzt 插件行
 #
 # 本插件不打包任何 Easel 内容——契约（SOUL.md / AGENTS.md）与技能
 # （skills/openclaw/*/SKILL.md）都在运行时从 easelRoot 指向的 Easel 仓库读取，
 # 保证与官方仓库同步、不产生副本漂移。
 #
-# easelRoot 未配置时：easel_doctor 会给出配置指引，其余脚本类工具返回
+# easelRoot 未配置时：zmtgzt_doctor 会给出配置指引，其余脚本类工具返回
 # 结构化的未配置错误（kind: not-configured），不会中断会话。
 #
 # 推荐直接从官方仓库获取 Easel：
 #   git clone https://github.com/ZJU-REAL/Easel
 - insert:
-    - id: dsh-easel-orchestrator
-      name: dsh-easel-orchestrator
+    - id: dsh-zmtgzt
+      name: dsh-zmtgzt
       config:
         # easelRoot: /absolute/path/to/Easel
         registerEaselSkills: true

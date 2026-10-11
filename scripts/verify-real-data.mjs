@@ -76,7 +76,7 @@ const signal = new AbortController().signal
 const call = (name, args = {}) => registered.get(name).execute(args, { signal })
 
 console.log('\n[1] 真实契约注入')
-const contract = skills.find((s) => s.name === 'easel-orchestrator')
+const contract = skills.find((s) => s.name === 'zmtgzt')
 const realSoul = readFileSync(join(SRC, 'openclaw_workspace_SOUL.md'), 'utf8').trim()
 const realAgents = readFileSync(join(SRC, 'openclaw_workspace_AGENTS.md'), 'utf8').trim()
 check('SOUL.md 原文逐字一致', String(contract?.content).includes(realSoul))
@@ -87,12 +87,12 @@ check('真实 SOUL.md 的沟通风格在契约中', String(contract?.content).in
 check('契约含 dsh 接入说明', String(contract?.content).includes('本插件的接入方式'))
 
 console.log('\n[2] 真实技能扫描')
-const scanned = skills.filter((s) => s.name !== 'easel-orchestrator')
+const scanned = skills.filter((s) => s.name !== 'zmtgzt')
 check('全部真实技能被注册', scanned.length === realSkills.length, `${scanned.length} / ${realSkills.length}`)
 check('每个技能都有 description', scanned.every((s) => typeof s.description === 'string' && s.description.length > 10))
 
-const listed = await call('easel_skill', { action: 'list' })
-check('easel_skill list 返回真实技能', listed.total === realSkills.length, `total=${listed.total}`)
+const listed = await call('zmtgzt_skill', { action: 'list' })
+check('zmtgzt_skill list 返回真实技能', listed.total === realSkills.length, `total=${listed.total}`)
 check('层取值来自真实 frontmatter', listed.layers?.length > 0, JSON.stringify(listed.layers))
 
 const trending = listed.skills?.find((s) => s.name === 'skill-trending-topics')
@@ -104,13 +104,13 @@ const quality = listed.skills?.find((s) => s.name === 'skill-quality-gate')
 check('skill-quality-gate 层取值正确', quality?.layer === 'publish' || quality?.layer === 'produce', String(quality?.layer))
 
 console.log('\n[3] 真实技能正文读取')
-const detail = await call('easel_skill', { action: 'read', name: 'skill-trending-topics' })
+const detail = await call('zmtgzt_skill', { action: 'read', name: 'skill-trending-topics' })
 check('读到真实正文', String(detail.body).includes('## 执行步骤'))
 check('正文含真实 API 端点', String(detail.body).includes('60s.viki.moe'))
 check('frontmatter 已剥离', !String(detail.body).includes('layer: discover'))
 check('description 保留在元数据里', String(detail.description).includes('热搜'))
 
-const big = await call('easel_skill', { action: 'read', name: 'short-drama' })
+const big = await call('zmtgzt_skill', { action: 'read', name: 'short-drama' })
 const bigRaw = readFileSync(join(SRC, 'skills__openclaw__short-drama__SKILL.md'), 'utf8')
 const bigExpected = bigRaw.replace(/^---\r?\n[\s\S]*?\r?\n---\r?\n?/, '').trim()
 check(
@@ -123,7 +123,7 @@ check(
 check('references 字段结构正确', Array.isArray(big.references), `${big.references?.length ?? 0} 个（桩未含 references 文件）`)
 
 console.log('\n[4] 环境体检（真实仓库）')
-const diagnosis = await call('easel_doctor')
+const diagnosis = await call('zmtgzt_doctor')
 check('判定就绪', diagnosis.healthy === true, JSON.stringify(diagnosis.checks?.filter((c) => !c.ok)))
 check('技能计数正确', diagnosis.skillCount === realSkills.length, String(diagnosis.skillCount))
 check('层信息出现在体检里', String(JSON.stringify(diagnosis.checks)).includes('discover'))
