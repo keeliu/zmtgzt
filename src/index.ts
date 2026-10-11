@@ -32,6 +32,13 @@ import {
   verifyWechatCredentials,
   writeWechatAccount,
 } from './wechat-config.ts'
+import {
+  executePublish,
+  isPublishPlatform,
+  planPublish,
+  type PublishMode,
+  type PublishRequest,
+} from './publish.ts'
 
 export const name = PLUGIN_ID
 /** 工具注册依赖 tools 服务；skills / webServer 走响应式注入，允许晚于本插件启动。 */
@@ -695,6 +702,101 @@ function registerRoutes(
         }
         const result = removeWechatAccount(root, key)
         json(res, result.ok ? 200 : 500, { ...result, config: wechatStatus(root) })
+      } catch (error) {
+        json(res, 500, { ok: false, error: String(error) })
+      }
+    },
+  })
+
+  // -------------------------------------------------------------------------
+  // 发布：预检（dry-run）与执行
+  //   默认只预检；confirm=true 才真正发布。
+  //   门禁由上游脚本内置（小红书敏感信息硬拦、公众号 AI 味检测），
+  //   插件不转发 --allow-unsafe / --skip-ai-score 这类放行开关。
+  // -------------------------------------------------------------------------
+
+  const publishConfig = { ...config, easelRoot: root }
+
+  const asArray = (value: unknown): string[] | undefined => {
+    if (value === undefined || value === null) return undefined
+    const list = Array.isArray(value) ? value.map(String) : String(value).split(',')
+    const filtered = list.map((item) => item.trim()).filter(Boolean)
+    return filtered.length ? filtered : undefined
+  }
+
+  /** 把请求体转成发布入参（含平台校验）。 */
+  const readPublishRequest = (
+    body: Record<string, unknown>
+  ): PublishRequest | { error: string; hint?: string } => {
+    const platform = String(body.platform ?? '')
+    if (!isPublishPlatform(platform)) {
+      return {
+        error: `未知平台：${platform || '(空)'}`,
+        hint: '可选：xiaohongshu（小红书）/ wechat-mp（微信公众号）',
+      }
+    }
+    const request: PublishRequest = {
+      platform,
+      title: String(body.title ?? ''),
+      officialApi: body.officialApi === true,
+      confirm: body.confirm === true,
+    }
+    if (body.mode) request.mode = String(body.mode) as PublishMode
+    if (body.content !== undefined) request.content = String(body.content)
+    const images = asArray(body.images)
+    if (images) request.images = images
+    if (body.video !== undefined) request.video = String(body.video)
+    const tags = asArray(body.tags)
+    if (tags) request.tags = tags
+    if (body.cover !== undefined) request.cover = String(body.cover)
+    if (body.digest !== undefined) request.digest = String(body.digest)
+    if (body.author !== undefined) request.author = String(body.author)
+    if (body.html !== undefined) request.html = String(body.html)
+    return request
+  }
+
+  webServer.register({
+    kind: 'exact',
+    path: `${API_PREFIX}/publish/plan`,
+    handler: async (req: any, res: any) => {
+      try {
+        if (req.method !== 'POST') {
+          res.writeHead(405)
+          res.end()
+          return
+        }
+        const body = await readJsonBody(req)
+        const parsed = readPublishRequest(body)
+        if ('error' in parsed) {
+          json(res, 400, { ok: false, ...parsed })
+          return
+        }
+        // 预检不带 confirm，因此不会有任何副作用
+        json(res, 200, { ok: true, plan: planPublish(publishConfig, { ...parsed, confirm: false }) })
+      } catch (error) {
+        json(res, 500, { ok: false, error: String(error) })
+      }
+    },
+  })
+
+  webServer.register({
+    kind: 'exact',
+    path: `${API_PREFIX}/publish`,
+    handler: async (req: any, res: any) => {
+      try {
+        if (req.method !== 'POST') {
+          res.writeHead(405)
+          res.end()
+          return
+        }
+        const body = await readJsonBody(req)
+        const parsed = readPublishRequest(body)
+        if ('error' in parsed) {
+          json(res, 400, { ok: false, ...parsed })
+          return
+        }
+        const result = await executePublish(publishConfig, parsed)
+        json(res, result.ok ? 200 : 400, result)
       } catch (error) {
         json(res, 500, { ok: false, error: String(error) })
       }

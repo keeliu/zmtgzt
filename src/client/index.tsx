@@ -40,7 +40,7 @@ const PANEL_ORDER = 30
  */
 let selectPanel: ((id: string) => void) | null = null
 
-const TABS = ['总览', '账号', '画像', '主题', '环境自检'] as const
+const TABS = ['总览', '账号', '画像', '主题', '发布', '环境自检'] as const
 type Tab = (typeof TABS)[number]
 
 async function api<T>(path: string, init?: RequestInit): Promise<T> {
@@ -189,6 +189,7 @@ function WorkbenchPanel() {
           {tab === '账号' && <AccountPane />}
           {tab === '画像' && <ProfilePane />}
           {tab === '主题' && <TopicPane />}
+          {tab === '发布' && <PublishPane />}
           {tab === '环境自检' && <DoctorPane />}
         </PaneBoundary>
       </div>
@@ -1202,6 +1203,476 @@ function formatSize(bytes: number): string {
 }
 
 // ---------------------------------------------------------------------------
+// 发布
+// ---------------------------------------------------------------------------
+
+interface PlanCheckView {
+  name: string
+  ok: boolean
+  detail?: string
+  fix?: string
+}
+
+interface PublishPlanView {
+  ok: boolean
+  platformName: string
+  mode: string
+  script: string
+  subcommand?: string
+  cli: string[]
+  checks: PlanCheckView[]
+  warnings: string[]
+  steps: string[]
+  followUp: string[]
+}
+
+interface PublishResultView {
+  ok: boolean
+  platformName: string
+  executed: boolean
+  draftOnly: boolean
+  error?: string
+  hint?: string
+  followUp: string[]
+  plan: PublishPlanView
+}
+
+const IMAGE_EXT = /\.(jpe?g|png|webp|gif)$/i
+const VIDEO_EXT = /\.(mp4|mov|m4v|webm)$/i
+
+/** 平台与内容类型（与 src/publish.ts 的映射保持一致）。 */
+const PUBLISH_PLATFORMS = [
+  {
+    id: 'xiaohongshu',
+    name: '小红书',
+    modes: [
+      { id: 'image', name: '图文' },
+      { id: 'video', name: '视频' },
+    ],
+  },
+  { id: 'wechat-mp', name: '微信公众号', modes: [{ id: 'draft', name: '草稿' }] },
+]
+
+/**
+ * 发布页。
+ *
+ * 三点刻意的设计：
+ *   1. 预检与发布分开按钮 —— 先看预检，才可能点「确认发布」，避免手滑直接对外发。
+ *   2. 发布走界面内二次确认，且确认文案写明后果（公开发布 / 创建草稿）。
+ *   3. 不提供任何绕过门禁的开关 —— 安全检查由上游脚本执行。
+ */
+function PublishPane() {
+  const [platform, setPlatform] = useState('xiaohongshu')
+  const [mode, setMode] = useState('image')
+  const [topics, setTopics] = useState<TopicRow[]>([])
+  const [topic, setTopic] = useState('')
+  const [dir, setDir] = useState('')
+  const [entries, setEntries] = useState<Array<{ name: string; isDir: boolean; size: number }>>([])
+  const [selectedImages, setSelectedImages] = useState<string[]>([])
+  const [video, setVideo] = useState('')
+  const [cover, setCover] = useState('')
+  const [title, setTitle] = useState('')
+  const [content, setContent] = useState('')
+  const [tags, setTags] = useState('')
+  const [officialApi, setOfficialApi] = useState(false)
+  const [plan, setPlan] = useState<PublishPlanView | null>(null)
+  const [result, setResult] = useState<PublishResultView | null>(null)
+  const [busy, setBusy] = useState(false)
+  const [confirming, setConfirming] = useState(false)
+  const [status, setStatus] = useState('')
+
+  const platformSpec = PUBLISH_PLATFORMS.find((p) => p.id === platform) ?? PUBLISH_PLATFORMS[0]
+
+  useEffect(() => {
+    void (async () => {
+      try {
+        const data = await api<{ topics: TopicRow[] }>('/topic')
+        setTopics(data.topics ?? [])
+      } catch (error) {
+        setStatus(`读取主题失败：${String(error)}`)
+      }
+    })()
+  }, [])
+
+  const resetOutput = () => {
+    setPlan(null)
+    setResult(null)
+    setConfirming(false)
+  }
+
+  const switchPlatform = (id: string) => {
+    setPlatform(id)
+    setMode(id === 'wechat-mp' ? 'draft' : 'image')
+    setSelectedImages([])
+    setVideo('')
+    resetOutput()
+  }
+
+  const openTopic = async (name: string) => {
+    setTopic(name)
+    setSelectedImages([])
+    setVideo('')
+    resetOutput()
+    try {
+      const data = await api<{
+        dir: string
+        entries: Array<{ name: string; isDir: boolean; size: number }>
+      }>(`/topic?name=${encodeURIComponent(name)}`)
+      setDir(data.dir ?? '')
+      setEntries((data.entries ?? []).filter((entry) => !entry.isDir))
+    } catch (error) {
+      setStatus(`读取产物失败：${String(error)}`)
+    }
+  }
+
+  const mediaFiles = entries.filter((entry) => IMAGE_EXT.test(entry.name) || VIDEO_EXT.test(entry.name))
+  const absPath = (name: string) => (dir ? `${dir}/${name}` : name)
+
+  const buildBody = (confirm: boolean) => ({
+    platform,
+    mode,
+    title,
+    content,
+    images: selectedImages,
+    video,
+    tags: tags
+      .split(',')
+      .map((tag) => tag.trim())
+      .filter(Boolean),
+    cover,
+    officialApi,
+    confirm,
+  })
+
+  const runPlan = async () => {
+    setBusy(true)
+    setStatus('')
+    setResult(null)
+    setConfirming(false)
+    try {
+      const res = await api<{ ok: boolean; plan?: PublishPlanView; error?: string; hint?: string }>(
+        '/publish/plan',
+        { method: 'POST', body: JSON.stringify(buildBody(false)) }
+      )
+      if (!res.ok || !res.plan) {
+        setStatus([res.error, res.hint].filter(Boolean).join(' — ') || '预检失败')
+        return
+      }
+      setPlan(res.plan)
+    } catch (error) {
+      setStatus(`预检失败：${String(error)}`)
+    } finally {
+      setBusy(false)
+    }
+  }
+
+  const doPublish = async () => {
+    setBusy(true)
+    setConfirming(false)
+    setStatus('')
+    try {
+      const res = await api<PublishResultView>('/publish', {
+        method: 'POST',
+        body: JSON.stringify(buildBody(true)),
+      })
+      setResult(res)
+      if (res.plan) setPlan(res.plan)
+    } catch (error) {
+      setStatus(`发布失败：${String(error)}`)
+    } finally {
+      setBusy(false)
+    }
+  }
+
+  return (
+    <div style={S.stack}>
+      {/* 1. 平台 */}
+      <div style={S.card}>
+        <strong>发布到哪个平台</strong>
+        <div style={S.row}>
+          {PUBLISH_PLATFORMS.map((item) => (
+            <button
+              key={item.id}
+              style={{ ...S.tab, ...(platform === item.id ? S.tabActive : null) }}
+              onClick={() => switchPlatform(item.id)}
+            >
+              {item.name}
+            </button>
+          ))}
+          {platformSpec.modes.length > 1 &&
+            platformSpec.modes.map((item) => (
+              <button
+                key={item.id}
+                style={{ ...S.tab, ...(mode === item.id ? S.tabActive : null) }}
+                onClick={() => {
+                  setMode(item.id)
+                  resetOutput()
+                }}
+              >
+                {item.name}
+              </button>
+            ))}
+        </div>
+        <p style={S.muted}>
+          {platform === 'wechat-mp'
+            ? '公众号：脚本创建的是「草稿」，不会自动群发——创建后仍需你到公众号后台手动群发。'
+            : '小红书：公开笔记，发布后平台可见，且不可撤销。'}
+        </p>
+        {platform === 'xiaohongshu' && (
+          <p style={S.warnText}>
+            ⚠ 小红书自动化发布存在平台风控、限流与封号风险。建议先用测试号、小流量运行，最终内容人工复核。
+          </p>
+        )}
+      </div>
+
+      {/* 2. 主题与产物 */}
+      <div style={S.card}>
+        <strong>从主题产物里选媒体</strong>
+        <p style={S.muted}>
+          脚本会校验路径存在性，因此媒体从主题的产物目录里点选，而不是手填路径。
+        </p>
+        {topics.length === 0 && (
+          <p style={S.muted}>还没有主题。先到「主题」页创建并产出素材，再回来发布。</p>
+        )}
+        <div style={S.row}>
+          {topics.map((item) => (
+            <button
+              key={item.name}
+              style={{ ...S.tab, ...(topic === item.name ? S.tabActive : null) }}
+              onClick={() => void openTopic(item.name)}
+            >
+              {item.name}
+            </button>
+          ))}
+        </div>
+        {topic && mediaFiles.length === 0 && <p style={S.muted}>该主题下暂无可用的图片或视频产物。</p>}
+        {mediaFiles.length > 0 && (
+          <div style={S.mediaGrid}>
+            {mediaFiles.map((entry) => {
+              const path = absPath(entry.name)
+              const isImage = IMAGE_EXT.test(entry.name)
+              const selected = isImage ? selectedImages.includes(path) : video === path
+              return (
+                <button
+                  key={entry.name}
+                  style={{ ...S.mediaItem, ...(selected ? S.mediaItemActive : null) }}
+                  title={path}
+                  onClick={() => {
+                    if (isImage) {
+                      setSelectedImages((prev) =>
+                        prev.includes(path) ? prev.filter((p) => p !== path) : [...prev, path]
+                      )
+                    } else {
+                      setVideo((prev) => (prev === path ? '' : path))
+                    }
+                    resetOutput()
+                  }}
+                >
+                  <span style={S.mediaName}>{entry.name}</span>
+                  <span style={S.muted}>
+                    {isImage ? '图片' : '视频'} · {formatSize(entry.size)}
+                  </span>
+                </button>
+              )
+            })}
+          </div>
+        )}
+        {topic && (
+          <p style={S.muted}>
+            已选：{selectedImages.length} 张图片{video ? ' + 1 个视频' : ''}
+          </p>
+        )}
+        {dir && <span style={S.mono}>{dir}</span>}
+      </div>
+
+      {/* 3. 内容 */}
+      <div style={S.card}>
+        <strong>内容</strong>
+        <div style={S.formGrid}>
+          <label style={S.label}>
+            标题{platform === 'xiaohongshu' ? '（≤20 全角，预检会校验）' : ''}
+            <input
+              style={S.input}
+              value={title}
+              onChange={(event) => {
+                setTitle(event.target.value)
+                resetOutput()
+              }}
+            />
+          </label>
+          <label style={S.label}>
+            {platform === 'xiaohongshu' ? '正文' : '正文（Markdown，脚本会自行排版）'}
+            <textarea
+              style={{ ...S.input, minHeight: 96, resize: 'vertical' }}
+              value={content}
+              onChange={(event) => {
+                setContent(event.target.value)
+                resetOutput()
+              }}
+            />
+          </label>
+          {platform === 'xiaohongshu' ? (
+            <label style={S.label}>
+              话题（逗号分隔）
+              <input
+                style={S.input}
+                value={tags}
+                placeholder="穿搭,通勤"
+                onChange={(event) => {
+                  setTags(event.target.value)
+                  resetOutput()
+                }}
+              />
+            </label>
+          ) : (
+            <>
+              <label style={S.label}>
+                封面图路径（必填）
+                <input
+                  style={S.input}
+                  value={cover}
+                  placeholder="可从上方产物点选后一键填入"
+                  onChange={(event) => {
+                    setCover(event.target.value)
+                    resetOutput()
+                  }}
+                />
+              </label>
+              <div style={S.row}>
+                <button
+                  style={S.linkBtn}
+                  onClick={() => {
+                    if (selectedImages[0]) setCover(selectedImages[0])
+                  }}
+                >
+                  用第一张已选图片作为封面
+                </button>
+                <label style={S.checkRow}>
+                  <input
+                    type="checkbox"
+                    checked={officialApi}
+                    onChange={(event) => {
+                      setOfficialApi(event.target.checked)
+                      resetOutput()
+                    }}
+                  />
+                  走官方 API（需 AppID/AppSecret 与 IP 白名单）
+                </label>
+              </div>
+            </>
+          )}
+        </div>
+      </div>
+
+      {/* 4. 操作 */}
+      <div style={S.row}>
+        <button style={S.primaryBtn} disabled={busy} onClick={() => void runPlan()}>
+          {busy ? '处理中…' : '预检（不发布）'}
+        </button>
+        {plan?.ok && !confirming && (
+          <button style={S.ghostBtn} disabled={busy} onClick={() => setConfirming(true)}>
+            下一步：确认发布
+          </button>
+        )}
+        {confirming && (
+          <>
+            <button style={S.dangerBtn} disabled={busy} onClick={() => void doPublish()}>
+              确认{platform === 'wechat-mp' ? '创建草稿' : '发布到小红书'}（不可撤销）
+            </button>
+            <button style={S.ghostBtn} disabled={busy} onClick={() => setConfirming(false)}>
+              取消
+            </button>
+          </>
+        )}
+      </div>
+
+      {/* 5. 预检 */}
+      {plan && (
+        <div style={S.card}>
+          <div style={S.row}>
+            <strong>预检：{plan.platformName}</strong>
+            <span style={{ ...S.badge, ...(plan.ok ? S.badgeOk : S.badgeBad) }}>
+              {plan.ok ? '可以发布' : '存在问题'}
+            </span>
+          </div>
+          {plan.checks
+            .filter((check) => !check.ok)
+            .map((check) => (
+              <div key={check.name} style={S.probeRow}>
+                <span style={{ ...S.dot, background: '#cf222e' }} />
+                <span style={S.probeName}>{check.name}</span>
+                <span style={S.muted}>{check.detail ?? ''}</span>
+                {check.fix && <span style={S.fixText}>→ {check.fix}</span>}
+              </div>
+            ))}
+          <h4 style={S.sectionTitle}>将执行的步骤</h4>
+          <ol style={S.stepList}>
+            {plan.steps.map((step, index) => (
+              <li key={index}>{step}</li>
+            ))}
+          </ol>
+          <h4 style={S.sectionTitle}>实际命令（供核对参数）</h4>
+          <pre style={S.logBox}>
+            {`${plan.script.split('/').pop()} ${plan.subcommand ?? ''} ${plan.cli.join(' ')}`}
+          </pre>
+          {plan.warnings.map((warning, index) => (
+            <p key={index} style={S.warnText}>
+              ⚠ {warning}
+            </p>
+          ))}
+          {plan.followUp.length > 0 && (
+            <>
+              <h4 style={S.sectionTitle}>发布后你仍需完成</h4>
+              {plan.followUp.map((item, index) => (
+                <p key={index} style={S.muted}>
+                  · {item}
+                </p>
+              ))}
+            </>
+          )}
+        </div>
+      )}
+
+      {/* 6. 结果 */}
+      {result && (
+        <div style={S.card}>
+          <div style={S.row}>
+            <strong>
+              {result.ok ? '完成' : '失败'}：{result.platformName}
+            </strong>
+            <span style={{ ...S.badge, ...(result.ok ? S.badgeOk : S.badgeBad) }}>
+              {result.ok
+                ? result.executed
+                  ? result.draftOnly
+                    ? '草稿已创建'
+                    : '已发布'
+                  : '仅预检'
+                : '未成功'}
+            </span>
+          </div>
+          {result.error && <p style={S.errorText}>{result.error}</p>}
+          {result.hint && <p style={S.hint}>{result.hint}</p>}
+          {result.ok &&
+            result.followUp.map((item, index) => (
+              <p key={index} style={S.warnText}>
+                → {item}
+              </p>
+            ))}
+          {result.ok && !result.draftOnly && (
+            <p style={S.muted}>可到小红书查看该笔记；平台可能有审核延迟。</p>
+          )}
+          {!result.ok && platform === 'xiaohongshu' && /登录/.test(result.error ?? '') && (
+            <p style={S.muted}>看起来是登录态问题：请到「账号」页扫码登录后重试。</p>
+          )}
+        </div>
+      )}
+
+      {status && <p style={S.muted}>{status}</p>}
+    </div>
+  )
+}
+
+// ---------------------------------------------------------------------------
 // 环境自检
 // ---------------------------------------------------------------------------
 
@@ -1495,4 +1966,28 @@ const S: Record<string, React.CSSProperties> = {
   probeRow: { display: 'flex', alignItems: 'center', gap: 6, flexWrap: 'wrap', fontSize: 12 },
   probeName: { minWidth: 150 },
   fixText: { fontSize: 11, opacity: 0.8, fontFamily: 'ui-monospace, monospace' },
+  warnText: { margin: 0, fontSize: 12, color: '#bf8700' },
+
+  // --- 发布页 ---
+  mediaGrid: {
+    display: 'grid',
+    gridTemplateColumns: 'repeat(auto-fill, minmax(150px, 1fr))',
+    gap: 8,
+  },
+  mediaItem: {
+    display: 'flex',
+    flexDirection: 'column',
+    gap: 2,
+    textAlign: 'left',
+    padding: '8px 10px',
+    borderRadius: 8,
+    border: `1px solid ${border}`,
+    background: 'transparent',
+    color: 'inherit',
+    cursor: 'pointer',
+    fontSize: 12,
+  },
+  mediaItemActive: { background: activeBg, borderColor: 'currentColor' },
+  mediaName: { overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' },
+  stepList: { margin: 0, paddingLeft: 18, fontSize: 12, opacity: 0.85, lineHeight: 1.7 },
 }

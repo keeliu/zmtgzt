@@ -252,6 +252,19 @@ check('新建走内联表单（含校验提示）', clientSource.includes('名�
 check('删除走界面内二次确认', clientSource.includes('确认删除'))
 
 // ---------------------------------------------------------------------------
+console.log('\n[F] 发布页')
+// ---------------------------------------------------------------------------
+
+check('存在独立于发布的预检按钮', clientSource.includes('预检（不发布）'))
+check('发布需要二次确认', clientSource.includes('不可撤销'))
+check('公众号草稿语义在界面呈现', clientSource.includes('手动群发'))
+check('小红书风控风险提示在界面呈现', clientSource.includes('平台风控'))
+check('发布页会展示实际命令（供核对参数）', clientSource.includes('实际命令'))
+// 门禁由上游脚本执行，界面不该有放行入口
+check('★ 界面不提供 allow-unsafe 入口', !clientSource.includes('allow-unsafe'))
+check('★ 界面不提供 skip-ai-score 入口', !clientSource.includes('skip-ai-score'))
+
+// ---------------------------------------------------------------------------
 
 console.log('')
 if (failures.length) {

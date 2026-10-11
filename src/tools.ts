@@ -17,6 +17,7 @@ import { defineTool } from '@deepseek-ai/dsh-tools'
 import type { ResolvedConfig } from './config.ts'
 import { failureText, isEaselFailure, runEaselScript, type ScriptArgs } from './runner.ts'
 import type { EaselRepo } from './repo.ts'
+import { executePublish, isPublishPlatform, type PublishMode, type PublishRequest } from './publish.ts'
 
 /** 工具运行期依赖。 */
 export interface ToolDeps {
@@ -51,6 +52,18 @@ function stringify(value: unknown): string {
   } catch {
     return String(value)
   }
+}
+
+/** 把「字符串 / 逗号分隔串 / 数组」统一成字符串数组；空则返回 undefined。 */
+function toStringArray(value: unknown): string[] | undefined {
+  if (value === undefined || value === null) return undefined
+  const list = Array.isArray(value)
+    ? value.map((item) => String(item).trim())
+    : String(value)
+        .split(',')
+        .map((item) => item.trim())
+  const filtered = list.filter(Boolean)
+  return filtered.length ? filtered : undefined
 }
 
 function stripUndefined(args: Record<string, unknown>): ScriptArgs {
@@ -359,6 +372,70 @@ export function createTools(deps: ToolDeps) {
       subcommand: (a) => String(a.action ?? 'scan'),
       passthrough: ['text', 'file'],
       summary: () => '敏感信息扫描完成。',
+    }),
+
+    // -----------------------------------------------------------------------
+    // 3.5 发布：默认只预检，显式确认才真发
+    // -----------------------------------------------------------------------
+    defineTool({
+      name: 'zmtgzt_publish',
+      description:
+        '发布内容到平台。**默认只做预检（dry-run），传 confirm=true 才真正发布。** ' +
+        '小红书：platform=xiaohongshu，mode=image 需 images（至少一张，路径须真实存在），' +
+        'mode=video 需 video；标题上限 20（全角计法，工具会预先校验）。' +
+        '微信公众号：platform=wechat-mp，需 cover 与正文（html 路径或 content Markdown）；' +
+        '**产物是草稿而非群发**，仍需到公众号后台手动群发。' +
+        '发布前脚本会自行执行安全门禁（小红书为敏感信息硬拦、公众号为 AI 味检测达阈值即阻止），' +
+        '本工具不提供放行开关。' +
+        '用法：先不带 confirm 调用看预检与步骤，把标题/正文/媒体交用户确认后，再带 confirm 发布。',
+      parameters: {
+        platform: e(['xiaohongshu', 'wechat-mp'], '平台：xiaohongshu=小红书，wechat-mp=微信公众号', true),
+        mode: e(['image', 'video', 'draft'], '内容类型：小红书 image/video，公众号 draft（缺省按平台推断）'),
+        title: sr('标题（小红书 ≤20 全角；公众号 ≤64）'),
+        content: s('正文。小红书为笔记正文；公众号为 Markdown 正文（会写成临时文件交给 --input）'),
+        images: arr('小红书图文：图片路径（数组或逗号分隔），至少一张且磁盘上存在'),
+        video: s('小红书视频：视频文件路径'),
+        tags: arr('话题（数组或逗号分隔，如 ["AI","教程"]）'),
+        cover: s('公众号：封面图路径（必填）'),
+        digest: s('公众号：摘要'),
+        author: s('公众号：作者名'),
+        html: s('公众号：已排版 HTML 路径（与 content 二选一）'),
+        officialApi: b('公众号：true 走官方 API（需 AppID/AppSecret 与 IP 白名单），缺省走后台会话'),
+        confirm: b('true 才真正发布；缺省只做预检，不产生任何对外副作用'),
+      },
+      output: {
+        schema: { type: 'json' } as never,
+        render: (_args: unknown, value: unknown) => [{ type: 'text' as const, text: stringify(value) }],
+      },
+      async execute(args: unknown) {
+        const a = (args ?? {}) as Record<string, unknown>
+        const platform = String(a.platform ?? '')
+        if (!isPublishPlatform(platform)) {
+          return {
+            ok: false,
+            error: `未知平台：${platform || '(空)'}`,
+            hint: '可选：xiaohongshu（小红书）/ wechat-mp（微信公众号）',
+          }
+        }
+        const request: PublishRequest = {
+          platform,
+          title: String(a.title ?? ''),
+          officialApi: a.officialApi === true,
+          confirm: a.confirm === true,
+        }
+        if (a.mode) request.mode = String(a.mode) as PublishMode
+        if (a.content !== undefined) request.content = String(a.content)
+        const images = toStringArray(a.images)
+        if (images) request.images = images
+        if (a.video !== undefined) request.video = String(a.video)
+        const tags = toStringArray(a.tags)
+        if (tags) request.tags = tags
+        if (a.cover !== undefined) request.cover = String(a.cover)
+        if (a.digest !== undefined) request.digest = String(a.digest)
+        if (a.author !== undefined) request.author = String(a.author)
+        if (a.html !== undefined) request.html = String(a.html)
+        return executePublish(deps.config, request)
+      },
     }),
 
     scriptTool(deps, {

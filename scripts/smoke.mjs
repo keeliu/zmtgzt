@@ -17,7 +17,7 @@ import { fileURLToPath } from 'node:url'
 const here = dirname(fileURLToPath(import.meta.url))
 const root = join(here, '..')
 
-const EXPECTED_TOOLS = 23
+const EXPECTED_TOOLS = 24
 const WORKSPACE = '/tmp/zmtgzt-smoke-workspace'
 
 function ensureHostStub() {

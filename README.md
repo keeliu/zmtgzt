@@ -6,8 +6,8 @@ A DeepSeek Harness (dsh) plugin that runs the [Easel](https://github.com/ZJU-REA
 
 - **Contract injection** — `openclaw/workspace/SOUL.md` and `AGENTS.md` are injected verbatim as a runtime skill
 - **Skill registration** — every `skills/openclaw/<name>/SKILL.md` is scanned and registered as a dsh skill, loaded on demand
-- **23 `zmtgzt_*` tools** — skill reading, script execution, and the manifest / profile / artifact surfaces
-- **A web view** in the `conversation.view` slot: skill library, account profiles, project artifacts, environment check
+- **24 `zmtgzt_*` tools** — skill reading, script execution, **publishing**, and the manifest / profile / artifact surfaces
+- **A "自媒体工作台" (Creator Workbench) entry in the left nav**, beside the built-in "Plugins" row: overview / accounts / profiles / topics / publishing / environment check
 
 ## Install
 
@@ -112,6 +112,30 @@ When no QR code appears, check in this order:
    status — without the log you'd only ever see `unknown`.
 3. The QR image is served from `/api/zmtgzt/account/login/qr` and **returns 404 when not yet
    generated**, so the UI never renders a broken image.
+
+### Publishing
+
+Both the workbench's **Publish** page and the `zmtgzt_publish` tool can publish. The flow is
+fixed as **preflight → confirm → publish**: without the confirm flag it only dry-runs and has
+no external effect.
+
+| Platform | Artifact | Prerequisites |
+| --- | --- | --- |
+| Xiaohongshu · image | Public note (irreversible) | Logged in; title ≤ 20 (full-width count); at least one image |
+| Xiaohongshu · video | Public note | Logged in; a video file |
+| WeChat MP | **Draft** (you still publish it manually in the MP console) | Backend session logged in, or AppID/AppSecret with the egress IP allowlisted |
+
+**The gates cannot be bypassed.** Upstream scripts run the pre-publish checks: Xiaohongshu scans
+for leaked internal information (**hard block**), WeChat MP runs an AI-tone check (blocked at the
+threshold). The plugin exposes **no** `--allow-unsafe` / `--skip-ai-score` escape hatch — if you
+really need one, call the generic runner explicitly in the conversation and say why.
+
+**Media is picked from topic artifacts.** The scripts verify that paths exist, so the Publish page
+only lists real files under `outputs/<topic>/` rather than letting you type a path.
+
+> ⚠ Automated posting to Xiaohongshu carries platform risk (rate limiting, account restrictions) —
+> upstream's own SKILL warns about this. Start with a test account and low volume, and review the
+> final content by hand. The plugin provides the capability but does not take on that risk for you.
 
 
 ## Tools

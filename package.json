@@ -1,7 +1,7 @@
 {
   "name": "dsh-zmtgzt",
-  "version": "0.3.0",
-  "description": "DeepSeek Harness plugin that brings the Easel social-content agent into dsh. Bundles an Easel snapshot (114 skills plus the SOUL.md / AGENTS.md contract) so no clone is required, releasing it to a writable workspace on first run. Registers 23 zmtgzt_* tools and adds a Creator Workbench (自媒体工作台) entry to the sidebar via the official sidebar.panellist + main registration. Channel login supports scan, in-window, and WeChat MP official-API credentials, with environment preflight and per-login log capture so failures are diagnosable.",
+  "version": "0.4.0",
+  "description": "DeepSeek Harness plugin that brings the Easel social-content agent into dsh. Bundles an Easel snapshot (114 skills plus the SOUL.md / AGENTS.md contract) so no clone is required, releasing it to a writable workspace on first run. Registers 24 zmtgzt_* tools and adds a Creator Workbench (自媒体工作台) entry to the sidebar via the official sidebar.panellist + main registration, covering channel login (scan / in-window / WeChat MP official-API credentials), profiles, topics with session binding, and publishing to Xiaohongshu (notes, video) and WeChat MP (drafts) with a preflight → confirm → publish flow.",
   "license": "MIT",
   "type": "module",
   "main": "lib/index.js",
@@ -52,6 +52,7 @@
     "ui": "node scripts/ui-entry.mjs",
     "login": "node scripts/login-flow.mjs",
     "wechat": "node scripts/wechat-config.mjs",
+    "publish": "node scripts/publish.mjs",
     "verify:real": "node scripts/verify-real-data.mjs",
     "sync:easel": "node scripts/sync-easel.mjs"
   },

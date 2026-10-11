@@ -191,13 +191,36 @@ function execPython(
   })
 }
 
-/** 把工具入参压成 CLI 参数：undefined/null 跳过，复合值 JSON 序列化。 */
+/**
+ * 把工具入参压成 CLI 参数。
+ *
+ * 布尔值按 **flag 语义**处理：`true` 只输出 `--key`（不带值），`false` 完全跳过。
+ *
+ * 原因（实测，不是推测）：上游脚本用 argparse 的 `store_true` / `store_false`，
+ * 其语义是「命令行里有没有这个 flag」，而不是「flag 带一个布尔值」。传 `--exec true`
+ * 会被解析成多出来的位置参数并报错：
+ *
+ * ```
+ * $ python3 xhs_publish.py publish ... --exec true
+ * error: unrecognized arguments: true          ← 命令直接失败
+ * $ python3 xhs_publish.py publish ... --exec
+ * ERROR: 文件不存在：...                        ← 解析通过，进入真正逻辑
+ * ```
+ *
+ * 小红书发布必须 `--exec` 才不是 dry-run，所以这条错了发布就永远不可能成功；
+ * `--headed` / `--no-proxy` / `--official-api` 等所有 flag 同理。
+ */
 export function toCliArgs(args: ScriptArgs): string[] {
   const out: string[] = []
   for (const [key, value] of Object.entries(args)) {
     if (value === undefined || value === null) continue
+    // flag 型：只表达「有/无」，不携带值
+    if (typeof value === 'boolean') {
+      if (value) out.push(`--${key}`)
+      continue
+    }
     out.push(`--${key}`)
-    if (typeof value === 'string' || typeof value === 'number' || typeof value === 'boolean') {
+    if (typeof value === 'string' || typeof value === 'number') {
       out.push(String(value))
     } else {
       out.push(JSON.stringify(value))
