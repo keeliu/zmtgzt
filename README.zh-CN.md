@@ -2,9 +2,9 @@
 
 把 [Easel](https://github.com/ZJU-REAL/Easel)（开源社媒内容智能体）接进 DeepSeek Harness 的 dsh 插件。
 
-**本插件不打包任何 Easel 内容。** 契约与全部技能都在运行时从你本地的 Easel 仓库读取，因此永远不会与上游漂移。插件提供的只是两个运行时之间的接缝：契约注入、技能注册、脚本执行。
+**装完即用，无需先 clone Easel。** 插件随包自带一份 Easel 快照（114 个技能、契约、147 个脚本），首次启动自动释放到可写目录。插件自己不撰写任何 Easel 内容——快照由 `scripts/sync-easel.mjs` 从官方仓库同步。
 
-- **契约注入**——从你的 Easel 仓库读 `openclaw/workspace/SOUL.md` 与 `AGENTS.md`，**原文**注册为运行时技能
+- **契约注入**——读 `openclaw/workspace/SOUL.md` 与 `AGENTS.md`，**原文**注册为运行时技能
 - **技能注册**——扫描 `skills/openclaw/<技能名>/SKILL.md`，逐个注册为 dsh 技能，按需加载
 - **23 个 `zmtgzt_*` 工具**——技能读取、脚本执行、manifest / 画像 / 产物三类状态入口
 - **Web 视图**（`conversation.view` 槽）：技能库、账号画像、项目产物、环境体检
@@ -12,12 +12,12 @@
 ## 安装
 
 ```sh
-git clone https://github.com/ZJU-REAL/Easel   # 官方上游
-
 dsh plugin add dsh-zmtgzt
 ```
 
-把插件指向你的仓库：
+就这两步。首次启动插件会把内置快照释放到 `~/.dsh/zmtgzt/easel/`（可配置），并自动生成一份 `.env`——想跑脚本类工具时把它填上即可。
+
+想改用自备仓库（例如跟进最新上游）再配置 `easelRoot`：
 
 ```yaml
 # 在 dsh profile 配置里
@@ -25,7 +25,7 @@ dsh plugin add dsh-zmtgzt
     - id: dsh-zmtgzt
       name: dsh-zmtgzt
       config:
-        easelRoot: /绝对路径/Easel
+        easelRoot: /绝对路径/Easel   # 可选；设置后覆盖内置快照
 ```
 
 然后跑一次 `zmtgzt_doctor` 确认。
@@ -96,16 +96,39 @@ Easel 的 prompt stack 是四层（见其 `docs/prompt-stack.md`）。dsh 没有
 
 | 键 | 默认值 | 说明 |
 | --- | --- | --- |
-| `easelRoot` | — | Easel 仓库绝对路径。脚本与技能能力都依赖它。 |
+| `easelRoot` | — | 自备 Easel 仓库的绝对路径。**设置后覆盖内置快照**。 |
+| `workspaceDir` | `~/.dsh/zmtgzt/easel` | 内置快照的释放位置；`.env`、`outputs/`、`profiles/` 都落在这里 |
+| `releaseEmbedded` | `true` | 是否在启动时释放/更新内置快照。关掉则直接以只读快照为根 |
 | `pythonPath` | `python` | Python 解释器（Windows 常需 `py` 或完整路径） |
 | `scriptTimeoutMs` | `300000` | 单次脚本超时 |
-| `registerEaselSkills` | `true` | 是否把仓库技能注册为 dsh 技能 |
-| `skillLayers` | `[]`（全部） | 只注册指定层，如 `[discover, plan]` |
+| `registerEaselSkills` | `true` | 是否把技能注册为 dsh 技能 |
+| `skillLayers` | `[]`（全部） | 只注册指定层，如 `[discover, plan]`，可缩短技能目录 |
 | `injectOrchestration` | `true` | 是否注入 SOUL + AGENTS 契约 |
 
-### 未配置 `easelRoot` 时
+## 内容来源与更新
 
-不会坏。脚本工具返回结构化的 `{ ok: false, kind, error, hint }` 而不是抛异常；契约技能会**明确声明** SOUL.md / AGENTS.md 未加载（而不是塞一份手写的替代品）；`zmtgzt_doctor` 打印出确切的修复步骤。
+插件自带 `vendor/easel/`（Easel 快照，Apache-2.0，见 `THIRD-PARTY-NOTICES.md`）。
+释放到工作目录时严格区分两类内容：
+
+| 类别 | 处理方式 |
+| --- | --- |
+| 快照内容（`openclaw/`、`docs/`、`skills/`、`LICENSE`、`SYNC-INFO.json`） | 发现版本变化时覆盖 |
+| 用户数据（`.env`、`outputs/`、`profiles/`、`assets/`） | **永不触碰** |
+
+跟上游同步：
+
+```sh
+node scripts/sync-easel.mjs               # 同步最新 main
+node scripts/sync-easel.mjs --ref v1.2.0  # 同步指定分支/标签
+```
+
+脚本会更新 `vendor/easel/` 并在 `SYNC-INFO.json` 记录来源 commit；插件下次启动即自动释放新版本。
+
+### 关于脚本类工具的依赖
+
+内置快照解决了"内容从哪来"，但**脚本能跑还需要运行环境**：Python 3、`pyproject.toml` 里声明的依赖、以及 `.env` 中的 API key。这部分装插件解决不了。首次释放会自动生成 `.env`，填好即可。
+
+未配置时不会坏：脚本工具返回结构化的 `{ ok: false, kind, error, hint }`，纯文字类工作（找热点、定策略、写文案、策划）完全不受影响。
 
 ## 开发
 

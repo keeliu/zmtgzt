@@ -5,7 +5,13 @@ node_modules/
 .DS_Store
 .vscode/
 .idea/
+.easel-sync-tmp/
 
-# 注意：lib/ 是预构建产物，必须提交——
-# 从 git 源码安装的插件不保证能跑构建步骤，预构建产物让
-# `dsh plugin add` 可以直接加载（也是插件市场推荐的形态）。
+# 注意：以下两处必须提交，不要加进忽略列表——
+#
+# lib/            预构建产物。从 git 源码安装的插件不保证能跑构建步骤，
+#                 预构建产物让 `dsh plugin add` 可以直接加载。
+#
+# vendor/easel/   Easel 快照（Apache-2.0，见其中的 LICENSE）。它让插件
+#                 无需先 clone Easel 即可使用；由 scripts/sync-easel.mjs
+#                 从官方仓库同步，请勿手工修改该目录。

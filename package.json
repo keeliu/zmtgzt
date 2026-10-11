@@ -13,10 +13,13 @@
   "files": [
     "lib/index.js",
     "lib/client.js",
+    "vendor/easel",
     "cordis.patch.yml",
     "dsh.plugin.json",
+    "scripts/sync-easel.mjs",
     "README.md",
     "README.zh-CN.md",
+    "THIRD-PARTY-NOTICES.md",
     "LICENSE"
   ],
   "keywords": [

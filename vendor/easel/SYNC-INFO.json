@@ -1,0 +1,22 @@
+{
+  "source": "https://github.com/ZJU-REAL/Easel.git",
+  "ref": "main",
+  "commit": "c8ad1f36bc7afc478abe5061c1eb838db90f0713",
+  "commitDate": "2026-10-11T14:18:26+08:00",
+  "syncedAt": "2026-10-11T06:59:20Z",
+  "entries": [
+    "openclaw",
+    "docs",
+    "skills",
+    "pyproject.toml",
+    "LICENSE",
+    ".env.example"
+  ],
+  "counts": {
+    "skills": 114,
+    "skillMarkdown": 114,
+    "pythonScripts": 147
+  },
+  "license": "Apache-2.0 (见同目录 LICENSE)",
+  "note": "此目录由 scripts/sync-easel.mjs 从 Easel 官方仓库同步而来，请勿手工修改；更新请重跑该脚本。"
+}

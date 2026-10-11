@@ -1,12 +1,16 @@
 /**
  * dsh-zmtgzt：把 Easel 接入 DeepSeek Harness。
  *
- * 本插件**不复制 Easel 的内容**，只做三件接入的事：
+ * 内容来源：插件**随包自带一份 Easel 快照**（`vendor/easel/`），首次启动释放到用户可写目录，
+ * 因此装完即用、无需先 clone Easel；若配置了 `config.easelRoot`，则改用自备仓库。
+ * 插件自己不撰写任何 Easel 内容——契约与技能均来自该快照（由 `scripts/sync-easel.mjs` 同步上游）。
+ *
+ * 只做三件接入的事：
  *   1. 契约注入：读 `openclaw/workspace/SOUL.md` + `AGENTS.md`，作为运行时技能注入
  *   2. 技能注册：扫描 skills/openclaw 下每个技能的 SKILL.md，注册为 dsh 技能（按需加载）
- *   3. 脚本执行：把 Easel 的 Python 脚本包装成工具（skills 下的 scripts 目录），走确定性 IO
+ *   3. 脚本执行：把 Easel 的 Python 脚本包装成工具，走确定性 IO
  *
- * 画像与产物仍是 Easel 仓库里的 `profiles/` 与 `outputs/`，插件不另存一份。
+ * 画像与产物写在生效根的 `profiles/` 与 `outputs/`，插件不另存一份。
  * @module dsh-zmtgzt
  */
 import { execFile } from 'node:child_process'
@@ -15,6 +19,7 @@ import { PLUGIN_ID, PLUGIN_VERSION, resolveConfig, type ZmtgztConfig } from './c
 import { EASEL_SHARED_DIR, EASEL_SKILLS_DIR, EASEL_WORKSPACE_DIR, EaselRepo } from './repo.ts'
 import { composeContract, skillRegistrationOf } from './orchestration.ts'
 import { createTools } from './tools.ts'
+import { directorySize, ensureWorkspace, type WorkspaceInfo } from './workspace.ts'
 
 export const name = PLUGIN_ID
 /** 工具注册依赖 tools 服务；skills / webServer 走响应式注入，允许晚于本插件启动。 */
@@ -36,10 +41,25 @@ const REQUIRED_PATHS: Array<{ path: string; label: string }> = [
 
 export async function apply(ctx: Context, rawConfig?: ZmtgztConfig) {
   const config = resolveConfig(rawConfig)
-  const repo = new EaselRepo(config.easelRoot)
-  const doctor = () => runDoctor(config, repo)
+  // 生效根：自备仓库优先，否则释放内置快照到用户可写目录
+  const workspace = ensureWorkspace(config)
+  const repo = new EaselRepo(workspace.root)
+  const doctor = () => runDoctor(config, repo, workspace)
 
   ctx.provide('zmtgztRepo', repo)
+  ctx.provide('zmtgztWorkspace', workspace)
+
+  if (workspace.release?.updated) {
+    ctx.logger?.info?.(`[${PLUGIN_ID}] 已释放内置 Easel 快照（${workspace.release.reason}）→ ${workspace.root}`)
+  }
+  if (workspace.createdEnv) {
+    ctx.logger?.warn?.(
+      `[${PLUGIN_ID}] 已从 .env.example 生成 ${workspace.root}/.env —— 脚本类工具需要你填入 API key 后才能工作。`
+    )
+  }
+  for (const warning of workspace.warnings) {
+    ctx.logger?.warn?.(`[${PLUGIN_ID}] ${warning}`)
+  }
 
   // ---- 工具层 ----
   const tools = createTools({ config, repo, doctor })
@@ -122,31 +142,26 @@ interface DoctorCheck {
 
 async function runDoctor(
   config: ReturnType<typeof resolveConfig>,
-  repo: EaselRepo
+  repo: EaselRepo,
+  workspace: WorkspaceInfo
 ): Promise<Record<string, unknown>> {
   const checks: DoctorCheck[] = []
 
   checks.push({
-    name: 'Easel 根目录已配置',
-    ok: Boolean(config.easelRoot),
-    detail: config.easelRoot ?? 'config.easelRoot 为空',
+    name: '生效的 Easel 根目录',
+    ok: Boolean(workspace.root),
+    detail: `${workspace.root}（${workspace.source === 'configured' ? '自备仓库' : '内置快照'}）`,
   })
-
-  if (!config.easelRoot) {
-    return {
-      healthy: false,
-      plugin: PLUGIN_ID,
-      version: PLUGIN_VERSION,
-      checks,
-      hint:
-        '在 dsh 配置里为 dsh-zmtgzt 设置 config.easelRoot，指向本地 Easel 仓库的绝对路径\n' +
-        '（该目录下应有 openclaw/workspace/AGENTS.md 与 skills/）。\n' +
-        '推荐直接从官方仓库获取：git clone https://github.com/ZJU-REAL/Easel\n' +
-        '配置后重新加载插件，再跑一次 zmtgzt_doctor。',
-    }
+  if (workspace.source === 'embedded') {
+    checks.push({
+      name: '内置快照版本',
+      ok: Boolean(workspace.commit),
+      detail: workspace.commit
+        ? `${workspace.commit.slice(0, 10)}${workspace.release?.reason ? ` · ${workspace.release.reason}` : ''}`
+        : '未找到 SYNC-INFO.json（无法确认上游版本）',
+    })
   }
 
-  const root = config.easelRoot
   for (const item of REQUIRED_PATHS) {
     const ok = await repo.has(item.path)
     checks.push({ name: item.label, ok, detail: ok ? undefined : `缺失：${item.path}` })
@@ -172,25 +187,41 @@ async function runDoctor(
   })
 
   const failed = checks.filter((c) => !c.ok)
+  const envMissing = failed.some((c) => c.name.startsWith('.env'))
+
   return {
     healthy: failed.length === 0,
     plugin: PLUGIN_ID,
     version: PLUGIN_VERSION,
-    easelRoot: root,
+    easelRoot: workspace.root,
+    rootSource: workspace.source,
+    embeddedCommit: workspace.commit ?? null,
+    workspaceDir: config.workspaceDir,
     pythonPath: config.pythonPath,
     scriptTimeoutMs: config.scriptTimeoutMs,
     skillCount: skills.length,
+    sharedScriptCount: sharedScripts.length,
+    warnings: workspace.warnings,
     checks,
-    hint: failed.length === 0
-      ? '环境就绪。可以先 zmtgzt_skill（action=list）看技能，再按任务 read 对应技能。'
-      : [
-          '以下项未通过，逐项修复后重跑 zmtgzt_doctor：',
-          ...failed.map((c) => `- ${c.name}${c.detail ? `：${c.detail}` : ''}`),
-          '',
-          `配置位置：dsh 配置中 dsh-zmtgzt 的 config.easelRoot（当前：${root}）`,
-          'Python 解释器可用 config.pythonPath 覆盖（Windows 常见为 py 或解释器绝对路径）。',
-          '若仓库不完整，建议重新 clone 官方仓库：https://github.com/ZJU-REAL/Easel',
-        ].join('\n'),
+    hint:
+      failed.length === 0
+        ? '环境就绪。可以先 zmtgzt_skill（action=list）看技能，再按任务 read 对应技能。'
+        : [
+            '以下项未通过，逐项修复后重跑 zmtgzt_doctor：',
+            ...failed.map((c) => `- ${c.name}${c.detail ? `：${c.detail}` : ''}`),
+            '',
+            workspace.source === 'embedded'
+              ? `契约与技能来自内置快照（已释放到 ${config.workspaceDir}），无需 clone Easel。`
+              : `当前使用自备仓库：${workspace.root}`,
+            envMissing
+              ? `脚本类工具需要 API key：编辑 ${workspace.root}/.env 填入后即可。\n` +
+                '不填也能用技能与契约（纯文字类工作不受影响）。'
+              : '',
+            'Python 解释器可用 config.pythonPath 覆盖（Windows 常见为 py 或解释器绝对路径）。',
+            '想换成自备仓库或跟进最新上游：设置 config.easelRoot，或运行 node scripts/sync-easel.mjs 更新内置快照。',
+          ]
+            .filter(Boolean)
+            .join('\n'),
   }
 }
 

@@ -12,7 +12,7 @@
  * @module dsh-zmtgzt/tools
  */
 import { mkdir, readdir, readFile, writeFile } from 'node:fs/promises'
-import { dirname } from 'node:path'
+import { dirname, join } from 'node:path'
 import { defineTool } from '@deepseek-ai/dsh-tools'
 import type { ResolvedConfig } from './config.ts'
 import { failureText, isEaselFailure, runEaselScript, type ScriptArgs } from './runner.ts'
@@ -560,8 +560,9 @@ export function createTools(deps: ToolDeps) {
       async execute(args: unknown) {
         const a = (args ?? {}) as Record<string, unknown>
         const action = String(a.action ?? 'list')
-        if (!deps.config.easelRoot) return notConfigured('读写画像')
-        const dir = `${deps.config.easelRoot}/profiles`
+        const root = deps.repo.rootDir
+        if (!root) return notConfigured('读写画像')
+        const dir = join(root, 'profiles')
         if (action === 'list') {
           const names = await listDirs(dir)
           return { ok: true, root: dir, profiles: names.filter((n) => !n.startsWith('_')) }
@@ -616,8 +617,9 @@ export function createTools(deps: ToolDeps) {
       async execute(args: unknown) {
         const a = (args ?? {}) as Record<string, unknown>
         const action = String(a.action ?? 'list')
-        if (!deps.config.easelRoot) return notConfigured('查看产物')
-        const outputs = `${deps.config.easelRoot}/outputs`
+        const root = deps.repo.rootDir
+        if (!root) return notConfigured('查看产物')
+        const outputs = join(root, 'outputs')
         if (action === 'list') {
           const names = await listDirs(outputs)
           return { ok: true, root: outputs, projects: names }
@@ -673,10 +675,10 @@ function notConfigured(what: string): Record<string, unknown> {
   return {
     ok: false,
     kind: 'not-configured',
-    error: `未配置 Easel 根目录，无法${what}。`,
+    error: `生效的 Easel 根目录不可用，无法${what}。`,
     hint:
-      '在 dsh 配置中为 dsh-zmtgzt 设置 config.easelRoot，指向本地 Easel 仓库绝对路径；' +
-      '配置后运行 zmtgzt_doctor 确认。',
+      '插件随包自带 Easel 快照，正常安装应当已自动释放。' +
+      '请运行 zmtgzt_doctor 查看具体原因；若想改用自备仓库，设置 config.easelRoot。',
   }
 }
 

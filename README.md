@@ -2,9 +2,9 @@
 
 A DeepSeek Harness (dsh) plugin that runs the [Easel](https://github.com/ZJU-REAL/Easel) social-content agent inside dsh.
 
-**It ships no Easel content.** The contract and every skill are read from a local Easel checkout at runtime, so the plugin never drifts from upstream. What the plugin provides is the seam between the two runtimes: contract injection, skill registration, and script execution.
+**Install and go — no Easel clone required.** The plugin ships an Easel snapshot (114 skills, the contract, 147 scripts) and releases it to a writable directory on first start. The plugin authors none of that content itself: the snapshot is synced from upstream by `scripts/sync-easel.mjs`.
 
-- **Contract injection** — `openclaw/workspace/SOUL.md` and `AGENTS.md` are read from your Easel checkout and registered as a runtime skill, verbatim
+- **Contract injection** — `openclaw/workspace/SOUL.md` and `AGENTS.md` are injected verbatim as a runtime skill
 - **Skill registration** — every `skills/openclaw/<name>/SKILL.md` is scanned and registered as a dsh skill, loaded on demand
 - **23 `zmtgzt_*` tools** — skill reading, script execution, and the manifest / profile / artifact surfaces
 - **A web view** in the `conversation.view` slot: skill library, account profiles, project artifacts, environment check
@@ -12,12 +12,12 @@ A DeepSeek Harness (dsh) plugin that runs the [Easel](https://github.com/ZJU-REA
 ## Install
 
 ```sh
-git clone https://github.com/ZJU-REAL/Easel   # the official upstream
-
 dsh plugin add dsh-zmtgzt
 ```
 
-Point the plugin at your checkout:
+That's it. On first start the plugin releases the bundled snapshot to `~/.dsh/zmtgzt/easel/` (configurable) and generates a `.env` from `.env.example` — fill it in when you want the script-backed tools to work.
+
+To use your own checkout instead (e.g. to track upstream closely), set `easelRoot`:
 
 ```yaml
 # in your dsh profile config
@@ -25,7 +25,7 @@ Point the plugin at your checkout:
     - id: dsh-zmtgzt
       name: dsh-zmtgzt
       config:
-        easelRoot: /absolute/path/to/Easel
+        easelRoot: /absolute/path/to/Easel   # optional; overrides the bundled snapshot
 ```
 
 Then run `zmtgzt_doctor` to confirm.
@@ -96,16 +96,38 @@ The only text the plugin writes itself is a short bridge note explaining these m
 
 | Key | Default | Meaning |
 | --- | --- | --- |
-| `easelRoot` | — | Absolute path to the Easel checkout. Required for anything script- or skill-backed. |
-| `pythonPath` | `python` | Python interpreter (Windows often needs `py` or a full path). |
-| `scriptTimeoutMs` | `300000` | Per-invocation script timeout. |
-| `registerEaselSkills` | `true` | Register the repo's skills as dsh skills. |
-| `skillLayers` | `[]` (all) | Restrict registration to certain layers, e.g. `[discover, plan]`. |
-| `injectOrchestration` | `true` | Inject the SOUL + AGENTS contract. |
+| `easelRoot` | — | Absolute path to your own Easel checkout. **Overrides the bundled snapshot.** |
+| `workspaceDir` | `~/.dsh/zmtgzt/easel` | Where the snapshot is released; `.env`, `outputs/`, `profiles/` live here |
+| `releaseEmbedded` | `true` | Release/update the bundled snapshot on start. When false, the read-only snapshot is used directly |
+| `pythonPath` | `python` | Python interpreter (Windows often needs `py` or a full path) |
+| `scriptTimeoutMs` | `300000` | Per-invocation script timeout |
+| `registerEaselSkills` | `true` | Register the repo's skills as dsh skills |
+| `skillLayers` | `[]` (all) | Restrict registration to certain layers, e.g. `[discover, plan]` |
+| `injectOrchestration` | `true` | Inject the SOUL + AGENTS contract |
 
-### Without `easelRoot`
+## Where the content comes from, and how to update it
 
-Nothing breaks. Script tools return a structured `{ ok: false, kind, error, hint }` value instead of throwing, the contract skill states plainly that `SOUL.md` / `AGENTS.md` were not loaded (rather than substituting a hand-written contract), and `zmtgzt_doctor` prints the exact fix.
+The plugin bundles `vendor/easel/` (an Easel snapshot, Apache-2.0 — see `THIRD-PARTY-NOTICES.md`). Releasing it keeps two things strictly apart:
+
+| Category | Behaviour |
+| --- | --- |
+| Snapshot content (`openclaw/`, `docs/`, `skills/`, `LICENSE`, `SYNC-INFO.json`) | Overwritten when the version changes |
+| Your data (`.env`, `outputs/`, `profiles/`, `assets/`) | **Never touched** |
+
+To move to a newer upstream:
+
+```sh
+node scripts/sync-easel.mjs               # latest main
+node scripts/sync-easel.mjs --ref v1.2.0  # a specific branch or tag
+```
+
+The script refreshes `vendor/easel/` and records the source commit in `SYNC-INFO.json`; the plugin releases the new version on its next start.
+
+### A note on script dependencies
+
+The bundled snapshot answers "where does the content come from", but **running the scripts still needs a runtime**: Python 3, the dependencies in `pyproject.toml`, and API keys in `.env`. Installing the plugin can't supply those. A `.env` is generated on first release — fill it in and you're set.
+
+Nothing breaks if you don't: script tools return a structured `{ ok: false, kind, error, hint }`, and text-only work (trend research, strategy, copywriting, planning) is unaffected.
 
 ## Development
 

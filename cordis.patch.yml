@@ -1,18 +1,24 @@
 # dsh-zmtgzt 插件行
 #
-# 本插件不打包任何 Easel 内容——契约（SOUL.md / AGENTS.md）与技能
-# （skills/openclaw/*/SKILL.md）都在运行时从 easelRoot 指向的 Easel 仓库读取，
-# 保证与官方仓库同步、不产生副本漂移。
+# 插件随包自带一份 Easel 快照（vendor/easel/，由 scripts/sync-easel.mjs 从官方仓库同步）。
+# 首次启动会把它释放到 config.workspaceDir（默认 ~/.dsh/zmtgzt/easel），
+# 因此**无需先 clone Easel 即可使用**——契约、114 个技能、147 个脚本都在包里。
 #
-# easelRoot 未配置时：zmtgzt_doctor 会给出配置指引，其余脚本类工具返回
-# 结构化的未配置错误（kind: not-configured），不会中断会话。
+# 释放时严格区分两类内容：
+#   - 快照内容（openclaw / docs / skills / LICENSE / SYNC-INFO.json）→ 更新时覆盖
+#   - 用户数据（.env / outputs / profiles / assets）→ 永不触碰
 #
-# 推荐直接从官方仓库获取 Easel：
-#   git clone https://github.com/ZJU-REAL/Easel
+# 脚本类工具需要 Python 环境与 API key：在生效根目录的 .env 中填写
+# （首次释放会从 .env.example 自动生成一份）。未填时脚本工具会提示缺配置，
+# 但纯文字类工作（找热点、定策略、写文案）完全不受影响。
+#
+# 想改用自备仓库或跟进最新上游：
+#   - 设置下面的 easelRoot 指向你 clone 的 Easel
+#   - 或运行 node scripts/sync-easel.mjs 更新内置快照
 - insert:
     - id: dsh-zmtgzt
       name: dsh-zmtgzt
       config:
-        # easelRoot: /absolute/path/to/Easel
+        # easelRoot: /absolute/path/to/Easel   # 可选：自备仓库，覆盖内置快照
         registerEaselSkills: true
         injectOrchestration: true

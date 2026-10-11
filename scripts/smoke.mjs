@@ -1,16 +1,16 @@
 /**
- * 冒烟测试：验证注册契约（不依赖真实 Easel 仓库）。
+ * 冒烟测试：验证注册契约与**内置快照**路径（不依赖外部 Easel 仓库）。
  *
  * 检查项：
  *   1. 模块导出 name / inject / apply（apply 为异步）
- *   2. 工具数量与名称规范
- *   3. 未配置 easelRoot 时：契约降级为"未加载"，工具返回结构化未配置错误
- *   4. 共享插件不打包 Easel 内容（skills/ 目录不应存在于插件内）
- *   5. Web 路由注册
+ *   2. 插件确实自带 vendor/easel 快照（装完即用的前提）
+ *   3. 工具数量与名称规范
+ *   4. 未配置 easelRoot 时：自动释放内置快照，契约与技能都能拿到
+ *   5. 释放时生成 .env、web 路由与服务注册
  *
  * 用法：node scripts/smoke.mjs
  */
-import { existsSync, mkdirSync, writeFileSync } from 'node:fs'
+import { existsSync, mkdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs'
 import { dirname, join } from 'node:path'
 import { fileURLToPath } from 'node:url'
 
@@ -18,6 +18,7 @@ const here = dirname(fileURLToPath(import.meta.url))
 const root = join(here, '..')
 
 const EXPECTED_TOOLS = 23
+const WORKSPACE = '/tmp/zmtgzt-smoke-workspace'
 
 function ensureHostStub() {
   const dir = join(root, 'node_modules/@deepseek-ai/dsh-tools')
@@ -49,7 +50,18 @@ check('export name', mod.name === 'dsh-zmtgzt', mod.name)
 check('export inject', Array.isArray(mod.inject) && mod.inject.includes('tools'), JSON.stringify(mod.inject))
 check('export apply', typeof mod.apply === 'function')
 
-console.log('\n[2] 工具注册')
+console.log('\n[2] 插件自带 Easel 快照')
+const vendorRoot = join(root, 'vendor/easel')
+check('vendor/easel 存在', existsSync(vendorRoot))
+check('含契约 SOUL.md', existsSync(join(vendorRoot, 'openclaw/workspace/SOUL.md')))
+check('含契约 AGENTS.md', existsSync(join(vendorRoot, 'openclaw/workspace/AGENTS.md')))
+check('含技能目录', existsSync(join(vendorRoot, 'skills/openclaw')))
+check('含共享脚本', existsSync(join(vendorRoot, 'skills/shared/scripts')))
+check('含 Apache-2.0 LICENSE', existsSync(join(vendorRoot, 'LICENSE')))
+const syncInfo = JSON.parse(readFileSync(join(vendorRoot, 'SYNC-INFO.json'), 'utf8'))
+check('SYNC-INFO 记录了上游 commit', typeof syncInfo.commit === 'string' && syncInfo.commit.length === 40, syncInfo.commit.slice(0, 10))
+
+console.log('\n[3] 工具注册')
 const registered = new Map()
 const provided = new Map()
 const skills = []
@@ -59,17 +71,15 @@ const ctx = {
   tools: { register: (tool) => registered.set(tool.name, tool) },
   provide: (key, value) => provided.set(key, value),
   inject: (deps, callback) => {
-    if (deps.includes('skills')) {
-      callback({ skills: { register: (skill) => { skills.push(skill); return () => {} } } })
-    }
-    if (deps.includes('webServer')) {
-      callback({ webServer: { register: (route) => routes.push(route) } })
-    }
+    if (deps.includes('skills')) callback({ skills: { register: (skill) => { skills.push(skill); return () => {} } } })
+    if (deps.includes('webServer')) callback({ webServer: { register: (route) => routes.push(route) } })
   },
   logger: { info: () => {}, warn: () => {}, error: () => {} },
 }
 
-await mod.apply(ctx, { easelRoot: '/tmp/definitely-not-a-real-easel-root' })
+// 不配置 easelRoot：验证内置快照的自动释放路径
+rmSync(WORKSPACE, { recursive: true, force: true })
+await mod.apply(ctx, { workspaceDir: WORKSPACE, registerEaselSkills: false })
 
 check('工具数量', registered.size === EXPECTED_TOOLS, `${registered.size} / ${EXPECTED_TOOLS}`)
 check('工具名均为 zmtgzt_ 前缀', [...registered.keys()].every((n) => n.startsWith('zmtgzt_')))
@@ -79,40 +89,44 @@ const malformed = [...registered.values()].filter(
 )
 check('工具定义结构完整', malformed.length === 0, malformed.map((t) => t.name).join(', ') || 'all valid')
 
-console.log('\n[3] 契约为空时的降级（路径不存在）')
-check('注册了契约技能', skills.length === 1, `${skills.length} 个：${skills.map((s) => s.name).join(', ')}`)
-const contract = skills[0]
-check('契约技能名为 zmtgzt', contract?.name === 'zmtgzt', contract?.name)
-check('契约正文声明未加载', String(contract?.content).includes('未加载'), '含"未加载"')
-check('契约给出配置指引', String(contract?.content).includes('easelRoot'))
-check('契约未编造 Easel 内容', !String(contract?.content).includes('五层分工'))
+console.log('\n[4] 内置快照释放')
+const workspace = provided.get('zmtgztWorkspace')
+check('提供了生效根信息', Boolean(workspace))
+check('来源为内置快照', workspace?.source === 'embedded', workspace?.source)
+check('根目录指向 workspaceDir', workspace?.root === WORKSPACE, workspace?.root)
+check('已完成释放', workspace?.release?.updated === true, workspace?.release?.reason)
+check('释放后契约就位', existsSync(join(WORKSPACE, 'openclaw/workspace/AGENTS.md')))
+check('释放后技能就位', existsSync(join(WORKSPACE, 'skills/openclaw')))
+check('自动生成了 .env', existsSync(join(WORKSPACE, '.env')))
 
-console.log('\n[4] 插件不打包 Easel 内容')
-check('插件内无 skills/ 目录', !existsSync(join(root, 'skills')))
+console.log('\n[5] 契约与技能来自内置快照')
+const contract = skills.find((s) => s.name === 'zmtgzt')
+check('契约技能已注册', Boolean(contract))
+const realSoul = readFileSync(join(vendorRoot, 'openclaw/workspace/SOUL.md'), 'utf8').trim()
+check('契约逐字包含真实 SOUL.md', String(contract?.content).includes(realSoul))
+check('契约含 dsh 接入说明', String(contract?.content).includes('本插件的接入方式'))
 
-console.log('\n[5] 共享服务与路由')
+const signal = new AbortController().signal
+const listResult = await registered.get('zmtgzt_skill').execute({ action: 'list' }, { signal })
+check('zmtgzt_skill 可列出技能', listResult.ok === true && listResult.total > 100, `total=${listResult.total}`)
+check('技能层取值来自真实 frontmatter', Array.isArray(listResult.layers) && listResult.layers.length > 0, JSON.stringify(listResult.layers))
+
+console.log('\n[6] 路由与服务')
 check('ctx.provide zmtgztRepo', Boolean(provided.get('zmtgztRepo')))
 check('注册 /api/zmtgzt 路由', routes.length >= 6, `${routes.length} 条`)
 check('健康检查路由存在', routes.some((r) => r.path === '/api/zmtgzt/health'))
 
-console.log('\n[6] 未配置时的工具行为')
-const doctor = registered.get('zmtgzt_doctor')
-const diagnosis = await doctor.execute({}, { signal: new AbortController().signal })
-check('zmtgzt_doctor 不抛异常', diagnosis?.healthy === false)
-check('doctor 指引含官方仓库地址', String(diagnosis.hint).includes('ZJU-REAL/Easel'))
+console.log('\n[7] 体检')
+const diagnosis = await registered.get('zmtgzt_doctor').execute({}, { signal })
+check('统计到技能数', Number(diagnosis.skillCount) > 100, String(diagnosis.skillCount))
+check('报告根来源为内置快照', diagnosis.rootSource === 'embedded', String(diagnosis.rootSource))
+check('.env 已生成故不报缺配置', diagnosis.checks.some((c) => c.name.startsWith('.env') && c.ok === true))
 
-const skillTool = registered.get('zmtgzt_skill')
-const listed = await skillTool.execute({ action: 'list' }, { signal: new AbortController().signal })
-check('zmtgzt_skill 返回未配置错误', listed.ok === false, listed.kind)
-check('错误带 hint', typeof listed.hint === 'string' && listed.hint.includes('easelRoot'))
-
-const run = registered.get('zmtgzt_run')
-const ran = await run.execute({ script: 'skills/shared/scripts/manifest.py', args: {} }, { signal: new AbortController().signal })
-check('zmtgzt_run 返回结构化失败面', ran.ok === false, ran.kind)
+rmSync(WORKSPACE, { recursive: true, force: true })
 
 console.log('')
 if (failures.length > 0) {
   console.error(`SMOKE FAILED: ${failures.length} 项未通过 — ${failures.join(', ')}`)
   process.exit(1)
 }
-console.log(`SMOKE PASSED: ${registered.size} 个工具、${routes.length} 条路由、契约降级行为正确。`)
+console.log(`SMOKE PASSED: ${registered.size} 个工具、内置快照释放正常、契约与 ${listResult.total} 个技能可用。`)
