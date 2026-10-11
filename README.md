@@ -119,10 +119,28 @@ node scripts/e2e.mjs             # behaviour against a mock Easel checkout (~35 
 
 `lib/` is committed so the plugin installs and loads without a build step.
 
-## Requirements
+## Version support
 
-- dsh `>= 0.1.0-rc.6`, Node.js 22+
-- A local [Easel](https://github.com/ZJU-REAL/Easel) checkout
+**Supported dsh versions: `>= 0.1.0-rc.6`** (covering all 0.1.x and 0.2.x rc / alpha releases).
+
+Verified by diffing the official type definitions at `0.1.0-rc.6` and `0.2.0-rc.2` — every interface this plugin uses has the same shape in both:
+
+| Interface | Package | 0.1.0-rc.6 | 0.2.0-rc.2 |
+| --- | --- | --- | --- |
+| `defineTool({name, description, parameters, output:{schema, render}, execute})` | `@deepseek-ai/dsh-tools` | ✅ | ✅ |
+| `ctx.tools.register(def)` → disposer | `@deepseek-ai/dsh-tools` | ✅ | ✅ |
+| `ctx.skills.register({name, description, whenToUse, source, provider, content})` | `@deepseek-ai/dsh-skill` | ✅ | ✅ |
+| `ctx.webServer.register({kind, path, handler})` | `@deepseek-ai/dsh-host-webserver` | ✅ | ✅ |
+| `ctx.provide(name, value)` | `@deepseek-ai/cordis` | ✅ | ✅ |
+
+The only differences are two **optional** fields added in 0.2.x (a tool's `deferLoading`, a route's `kind: 'global'`). Neither is used here, so they don't affect compatibility.
+
+No upper bound is pinned: `engines.dsh` is `>= 0.1.0-rc.6`, and `peerDependencies` accepts both `^0.1.0-rc.6` and `^0.2.0-rc.2`, all marked optional — these are host-provided and never installed by the plugin.
+
+### Other requirements
+
+- Node.js 22+
+- A local [Easel](https://github.com/ZJU-REAL/Easel) checkout (needed for script-backed tools and skill registration)
 
 ## License
 

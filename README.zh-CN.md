@@ -119,10 +119,28 @@ node scripts/e2e.mjs             # 针对 mock Easel 仓库的行为验证（约
 
 `lib/` 是刻意提交的：插件安装后无需构建即可加载。
 
-## 依赖环境
+## 版本支持
 
-- dsh `>= 0.1.0-rc.6`、Node.js 22+
-- 本地 [Easel](https://github.com/ZJU-REAL/Easel) 仓库
+**支持的 dsh 版本：`>= 0.1.0-rc.6`**（涵盖 0.1.x 与 0.2.x 的全部 rc / alpha 版本）
+
+验证方式：逐一比对了官方包在 `0.1.0-rc.6` 与 `0.2.0-rc.2` 两个版本的类型定义，本插件用到的全部接口在两版上形态一致：
+
+| 接口 | 来源包 | 0.1.0-rc.6 | 0.2.0-rc.2 |
+| --- | --- | --- | --- |
+| `defineTool({name, description, parameters, output:{schema, render}, execute})` | `@deepseek-ai/dsh-tools` | ✅ | ✅ |
+| `ctx.tools.register(def)` → disposer | `@deepseek-ai/dsh-tools` | ✅ | ✅ |
+| `ctx.skills.register({name, description, whenToUse, source, provider, content})` | `@deepseek-ai/dsh-skill` | ✅ | ✅ |
+| `ctx.webServer.register({kind, path, handler})` | `@deepseek-ai/dsh-host-webserver` | ✅ | ✅ |
+| `ctx.provide(name, value)` | `@deepseek-ai/cordis` | ✅ | ✅ |
+
+唯一差异是 0.2.x 新增的两个**可选**字段（工具的 `deferLoading`、路由的 `kind: 'global'`），本插件均未使用，因此不构成兼容性障碍。
+
+插件不锁定 dsh 上界：`engines.dsh` 声明为 `>= 0.1.0-rc.6`，`peerDependencies` 同时接受 `^0.1.0-rc.6` 与 `^0.2.0-rc.2`，并全部标记为 optional——由宿主提供，插件不自行安装。
+
+### 其他要求
+
+- Node.js 22+
+- 本地 [Easel](https://github.com/ZJU-REAL/Easel) 仓库（脚本类工具与技能注册需要）
 
 ## 许可
 
