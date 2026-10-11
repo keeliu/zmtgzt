@@ -14,12 +14,16 @@
  * @module dsh-zmtgzt
  */
 import { execFile } from 'node:child_process'
+import { join } from 'node:path'
 import type { Context } from '@deepseek-ai/cordis'
 import { PLUGIN_ID, PLUGIN_VERSION, resolveConfig, type ZmtgztConfig } from './config.ts'
 import { EASEL_SHARED_DIR, EASEL_SKILLS_DIR, EASEL_WORKSPACE_DIR, EaselRepo } from './repo.ts'
 import { composeContract, skillRegistrationOf } from './orchestration.ts'
 import { createTools } from './tools.ts'
 import { directorySize, ensureWorkspace, type WorkspaceInfo } from './workspace.ts'
+import { AccountService } from './account.ts'
+import { TopicStore } from './topics.ts'
+import { SessionBindingStore } from './session-bindings.ts'
 
 export const name = PLUGIN_ID
 /** 工具注册依赖 tools 服务；skills / webServer 走响应式注入，允许晚于本插件启动。 */
@@ -30,10 +34,8 @@ const API_PREFIX = '/api/zmtgzt'
 /** 契约技能名——与 Easel 技能名区分开。 */
 const CONTRACT_SKILL = 'zmtgzt'
 
-/** 体检要核对的仓库内关键路径。 */
+/** 体检要核对的仓库内关键路径（契约文件单独处理，因为它有根目录优先的读取顺序）。 */
 const REQUIRED_PATHS: Array<{ path: string; label: string }> = [
-  { path: `${EASEL_WORKSPACE_DIR}/SOUL.md`, label: 'SOUL.md（人格层）' },
-  { path: `${EASEL_WORKSPACE_DIR}/AGENTS.md`, label: 'AGENTS.md（编排层）' },
   { path: EASEL_SKILLS_DIR, label: '技能目录 skills/openclaw' },
   { path: EASEL_SHARED_DIR, label: '共享脚本 skills/shared/scripts' },
   { path: '.env', label: '.env（API key）' },
@@ -46,8 +48,17 @@ export async function apply(ctx: Context, rawConfig?: ZmtgztConfig) {
   const repo = new EaselRepo(workspace.root)
   const doctor = () => runDoctor(config, repo, workspace)
 
+  // 工作台三项服务：账号、主题、会话绑定。都以生效根为工作基准。
+  const root = workspace.root
+  const account = new AccountService({ ...config, easelRoot: root })
+  const topics = new TopicStore(join(root, 'outputs'))
+  const bindings = new SessionBindingStore(join(config.dataDir, 'bindings.json'))
+
   ctx.provide('zmtgztRepo', repo)
   ctx.provide('zmtgztWorkspace', workspace)
+  ctx.provide('zmtgztAccount', account)
+  ctx.provide('zmtgztTopics', topics)
+  ctx.provide('zmtgztBindings', bindings)
 
   if (workspace.release?.updated) {
     ctx.logger?.info?.(`[${PLUGIN_ID}] 已释放内置 Easel 快照（${workspace.release.reason}）→ ${workspace.root}`)
@@ -125,7 +136,7 @@ export async function apply(ctx: Context, rawConfig?: ZmtgztConfig) {
       ctx.logger?.warn?.(`[${PLUGIN_ID}] ctx.webServer 不可用（headless profile？），跳过 HTTP 路由`)
       return
     }
-    registerRoutes(webServer, config, repo, doctor)
+    registerRoutes(webServer, config, repo, doctor, account, topics, bindings)
     ctx.logger?.info?.(`[${PLUGIN_ID}] 路由已注册：${API_PREFIX}/*`)
   })
 }
@@ -161,6 +172,20 @@ async function runDoctor(
         : '未找到 SYNC-INFO.json（无法确认上游版本）',
     })
   }
+
+  // 契约文件：读一次以填充来源缓存，然后报告**实际**读取路径（根目录优先）
+  const contract = await repo.readContract()
+  const sources = repo.contractSourcePaths()
+  checks.push({
+    name: 'SOUL.md（人格层）',
+    ok: Boolean(contract.soul),
+    detail: sources.soul ?? '未找到（根目录与 openclaw/workspace/ 均缺失）',
+  })
+  checks.push({
+    name: 'AGENTS.md（编排层）',
+    ok: Boolean(contract.agents),
+    detail: sources.agents ?? '未找到（根目录与 openclaw/workspace/ 均缺失）',
+  })
 
   for (const item of REQUIRED_PATHS) {
     const ok = await repo.has(item.path)
@@ -265,7 +290,10 @@ function registerRoutes(
   webServer: any,
   config: ReturnType<typeof resolveConfig>,
   repo: EaselRepo,
-  doctor: () => Promise<Record<string, unknown>>
+  doctor: () => Promise<Record<string, unknown>>,
+  account: AccountService,
+  topics: TopicStore,
+  bindings: SessionBindingStore
 ): void {
   const root = config.easelRoot
 
@@ -428,6 +456,211 @@ function registerRoutes(
           .then((xs) => xs.map((x) => ({ name: x.name, isDir: x.isDirectory() })))
           .catch(() => [])
         json(res, 200, { ok: true, topic, dir, manifest, entries })
+      } catch (error) {
+        json(res, 500, { ok: false, error: String(error) })
+      }
+    },
+  })
+
+  // -------------------------------------------------------------------------
+  // 账号：列表 / 扫码登录 / 登录状态 / 登出 / 身份 / 创作数据
+  // -------------------------------------------------------------------------
+
+  webServer.register({
+    kind: 'exact',
+    path: `${API_PREFIX}/account`,
+    handler: async (_req: any, res: any) => {
+      try {
+        json(res, 200, { ok: true, channels: await account.list() })
+      } catch (error) {
+        json(res, 500, { ok: false, error: String(error) })
+      }
+    },
+  })
+
+  webServer.register({
+    kind: 'exact',
+    path: `${API_PREFIX}/account/login`,
+    handler: async (req: any, res: any) => {
+      try {
+        if (req.method !== 'POST') {
+          res.writeHead(405)
+          res.end()
+          return
+        }
+        const body = await readJsonBody(req)
+        const channelId = String(body.channelId ?? '')
+        const session = await account.startLogin(channelId)
+        if ('error' in session) {
+          json(res, 400, { ok: false, ...session })
+          return
+        }
+        json(res, 200, { ok: true, session })
+      } catch (error) {
+        json(res, 500, { ok: false, error: String(error) })
+      }
+    },
+  })
+
+  webServer.register({
+    kind: 'exact',
+    path: `${API_PREFIX}/account/login/status`,
+    handler: (req: any, res: any) => {
+      const url = new URL(req.url ?? '/', 'http://dsh.internal')
+      const channelId = url.searchParams.get('channelId') ?? ''
+      json(res, 200, { ok: true, ...account.loginStatus(channelId) })
+    },
+  })
+
+  webServer.register({
+    kind: 'exact',
+    path: `${API_PREFIX}/account/logout`,
+    handler: async (req: any, res: any) => {
+      try {
+        const body = await readJsonBody(req)
+        json(res, 200, await account.logout(String(body.channelId ?? '')))
+      } catch (error) {
+        json(res, 500, { ok: false, error: String(error) })
+      }
+    },
+  })
+
+  webServer.register({
+    kind: 'exact',
+    path: `${API_PREFIX}/account/whoami`,
+    handler: async (req: any, res: any) => {
+      try {
+        const url = new URL(req.url ?? '/', 'http://dsh.internal')
+        const result = await account.whoami(url.searchParams.get('channelId') ?? '')
+        json(res, 200, result)
+      } catch (error) {
+        json(res, 500, { ok: false, error: String(error) })
+      }
+    },
+  })
+
+  webServer.register({
+    kind: 'exact',
+    path: `${API_PREFIX}/account/stats`,
+    handler: async (req: any, res: any) => {
+      try {
+        const url = new URL(req.url ?? '/', 'http://dsh.internal')
+        const result = await account.stats(url.searchParams.get('channelId') ?? '')
+        json(res, 200, result)
+      } catch (error) {
+        json(res, 500, { ok: false, error: String(error) })
+      }
+    },
+  })
+
+  // -------------------------------------------------------------------------
+  // 主题：列表 / 创建 / 重命名 / 删除 / 产物树
+  // -------------------------------------------------------------------------
+
+  webServer.register({
+    kind: 'exact',
+    path: `${API_PREFIX}/topic`,
+    handler: async (req: any, res: any) => {
+      try {
+        if (req.method === 'GET') {
+          const url = new URL(req.url ?? '/', 'http://dsh.internal')
+          const want = url.searchParams.get('name')
+          if (want) {
+            const dir = topics.dirOf(want)
+            if (!dir) {
+              json(res, 400, { ok: false, error: '主题名非法' })
+              return
+            }
+            json(res, 200, {
+              ok: true,
+              name: want,
+              dir,
+              manifest: (await topics.readManifest(dir)) ?? null,
+              entries: await topics.entries(want),
+            })
+            return
+          }
+          json(res, 200, { ok: true, root: topics.root, topics: await topics.list() })
+          return
+        }
+        if (req.method === 'POST') {
+          const body = await readJsonBody(req)
+          const action = String(body.action ?? 'create')
+          if (action === 'create') {
+            const result = await topics.create(String(body.name ?? ''), body.baseDir ? String(body.baseDir) : undefined)
+            json(res, result.ok ? 200 : 400, result)
+            return
+          }
+          if (action === 'rename') {
+            const result = await topics.rename(String(body.name ?? ''), String(body.nextName ?? ''))
+            json(res, result.ok ? 200 : 400, result)
+            return
+          }
+          if (action === 'remove') {
+            const result = await topics.remove(String(body.name ?? ''))
+            json(res, result.ok ? 200 : 400, result)
+            return
+          }
+          json(res, 400, { ok: false, error: `未知操作：${action}` })
+          return
+        }
+        res.writeHead(405)
+        res.end()
+      } catch (error) {
+        json(res, 500, { ok: false, error: String(error) })
+      }
+    },
+  })
+
+  // -------------------------------------------------------------------------
+  // 会话与主题的绑定
+  // -------------------------------------------------------------------------
+
+  webServer.register({
+    kind: 'exact',
+    path: `${API_PREFIX}/binding`,
+    handler: async (req: any, res: any) => {
+      try {
+        if (req.method === 'GET') {
+          const url = new URL(req.url ?? '/', 'http://dsh.internal')
+          const sessionId = url.searchParams.get('sessionId')
+          if (sessionId) {
+            const binding = await bindings.get(sessionId)
+            json(res, 200, { ok: true, sessionId, binding: binding ?? null })
+            return
+          }
+          json(res, 200, { ok: true, bindings: await bindings.list() })
+          return
+        }
+        if (req.method === 'POST') {
+          const body = await readJsonBody(req)
+          const sessionId = String(body.sessionId ?? '').trim()
+          if (!sessionId) {
+            json(res, 400, { ok: false, error: 'sessionId 为必填' })
+            return
+          }
+          if (body.action === 'unbind') {
+            json(res, 200, { ok: true, ...(await bindings.remove(sessionId)) })
+            return
+          }
+          const topicName = String(body.topic ?? '').trim()
+          const dir = topics.dirOf(topicName)
+          if (!dir) {
+            json(res, 400, { ok: false, error: `主题名非法：${topicName}` })
+            return
+          }
+          // 绑定前确保主题目录存在，避免绑定到不存在的主题
+          const created = await topics.create(topicName)
+          if (!created.ok) {
+            json(res, 400, { ok: false, error: created.reason })
+            return
+          }
+          const binding = await bindings.set(sessionId, topicName, dir)
+          json(res, 200, { ok: true, sessionId, binding })
+          return
+        }
+        res.writeHead(405)
+        res.end()
       } catch (error) {
         json(res, 500, { ok: false, error: String(error) })
       }

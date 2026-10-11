@@ -45,8 +45,24 @@ const RELEASE_ENTRIES = [
   'SYNC-INFO.json',
 ]
 
+/**
+ * 契约文件：额外释放到工作目录**根**，让用户不必展开 `openclaw/workspace/` 就能看到与编辑。
+ * 根目录已存在同名文件时视为用户版本，不覆盖。
+ */
+const CONTRACT_FILES = ['SOUL.md', 'AGENTS.md']
+
 /** 释放时必须保留的用户数据（即使快照里同名也不覆盖）。 */
 const USER_DATA = new Set(['.env', 'outputs', 'profiles', 'assets'])
+
+/** 释放结果明细。 */
+export interface ReleaseDetail {
+  updated: boolean
+  reason: string
+  /** 本轮新写入工作目录根的契约文件。 */
+  contractsReleased: string[]
+  /** 因已存在用户版本而跳过的契约文件。 */
+  contractsKept: string[]
+}
 
 /**
  * 解析生效根，必要时释放内置快照。
@@ -99,7 +115,7 @@ export function ensureWorkspace(config: ResolvedConfig): WorkspaceInfo {
 }
 
 /** 比较快照版本，必要时把内容复制到工作目录（保留用户数据）。 */
-function releaseSnapshot(embedded: string, workspace: string): { updated: boolean; reason: string } {
+function releaseSnapshot(embedded: string, workspace: string): ReleaseDetail {
   mkdirSync(workspace, { recursive: true })
 
   const embeddedInfo = readSyncInfo(embedded)
@@ -108,26 +124,63 @@ function releaseSnapshot(embedded: string, workspace: string): { updated: boolea
   const workspaceCommit = workspaceInfo?.commit
 
   const missingCore = !existsSync(join(workspace, 'openclaw', 'workspace', 'AGENTS.md'))
-  if (!missingCore && embeddedCommit && embeddedCommit === workspaceCommit) {
-    return { updated: false, reason: `已是最新（${embeddedCommit.slice(0, 10)}）` }
-  }
+  const versionChanged = Boolean(embeddedCommit) && embeddedCommit !== workspaceCommit
+  const needCopy = missingCore || versionChanged
 
   const reason = missingCore
     ? '首次释放'
-    : embeddedCommit !== workspaceCommit
+    : versionChanged
       ? `更新 ${String(workspaceCommit).slice(0, 10)} → ${String(embeddedCommit).slice(0, 10)}`
-      : '补齐缺失内容'
+      : '已是最新'
 
-  for (const entry of RELEASE_ENTRIES) {
-    if (USER_DATA.has(entry)) continue
-    const src = join(embedded, entry)
-    if (!existsSync(src)) continue
-    const dest = join(workspace, entry)
-    rmSync(dest, { recursive: true, force: true })
-    cpSync(src, dest, { recursive: true })
+  if (needCopy) {
+    for (const entry of RELEASE_ENTRIES) {
+      if (USER_DATA.has(entry)) continue
+      const src = join(embedded, entry)
+      if (!existsSync(src)) continue
+      const dest = join(workspace, entry)
+      rmSync(dest, { recursive: true, force: true })
+      cpSync(src, dest, { recursive: true })
+    }
   }
 
-  return { updated: true, reason }
+  // 契约文件单独处理：即使快照本身没变，也要确保根目录有；但不覆盖用户已编辑的版本
+  const { released, kept } = releaseContractFiles(embedded, workspace)
+
+  // 快照没变但契约刚补齐时，仍算一次有效释放
+  const updated = needCopy || released.length > 0
+  return {
+    updated,
+    reason: released.length > 0 && !needCopy ? `${reason}；补齐根目录契约` : reason,
+    contractsReleased: released,
+    contractsKept: kept,
+  }
+}
+
+/** 把 `openclaw/workspace/{SOUL,AGENTS}.md` 复制到工作目录根；已存在则不覆盖。 */
+function releaseContractFiles(
+  embedded: string,
+  workspace: string
+): { released: string[]; kept: string[] } {
+  const sourceDir = join(embedded, 'openclaw', 'workspace')
+  const released: string[] = []
+  const kept: string[] = []
+  for (const name of CONTRACT_FILES) {
+    const from = join(sourceDir, name)
+    if (!existsSync(from)) continue
+    const to = join(workspace, name)
+    if (existsSync(to)) {
+      kept.push(name)
+      continue
+    }
+    try {
+      cpSync(from, to)
+      released.push(name)
+    } catch {
+      /* 单个文件复制失败不影响其它内容 */
+    }
+  }
+  return { released, kept }
 }
 
 /** 首次释放时从 .env.example 复制一份 .env，让用户知道要填什么。 */

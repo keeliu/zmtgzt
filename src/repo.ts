@@ -101,6 +101,7 @@ export function shortenDescription(description: string, limit = 180): string {
 export class EaselRepo {
   private skills?: EaselSkillMeta[]
   private contract?: EaselContract
+  private contractPaths?: { soul?: string; agents?: string }
 
   constructor(private readonly root: string | undefined) {}
 
@@ -117,6 +118,7 @@ export class EaselRepo {
   invalidate(): void {
     this.skills = undefined
     this.contract = undefined
+    this.contractPaths = undefined
   }
 
   private abs(rel: string): string {
@@ -125,17 +127,46 @@ export class EaselRepo {
 
   /**
    * 读取常驻层契约：SOUL.md（人格）+ AGENTS.md（编排逻辑）。
-   * 缺失的文件返回 undefined，由调用方决定降级形态。
+   *
+   * 读取顺序为**工作目录根优先**——用户可能直接编辑根目录的版本，
+   * 那份应当胜出；缺失时才回退到 `openclaw/workspace/` 下的快照副本。
    */
   async readContract(): Promise<EaselContract> {
     if (this.contract) return this.contract
     if (!this.available) return {}
     const [soul, agents] = await Promise.all([
-      readOptional(this.abs(`${EASEL_WORKSPACE_DIR}/SOUL.md`)),
-      readOptional(this.abs(`${EASEL_WORKSPACE_DIR}/AGENTS.md`)),
+      this.readContractFile('SOUL.md'),
+      this.readContractFile('AGENTS.md'),
     ])
-    this.contract = { ...(soul ? { soul } : {}), ...(agents ? { agents } : {}) }
+    this.contract = {
+      ...(soul ? { soul: soul.content } : {}),
+      ...(agents ? { agents: agents.content } : {}),
+    }
+    this.contractPaths = {
+      ...(soul ? { soul: soul.path } : {}),
+      ...(agents ? { agents: agents.path } : {}),
+    }
     return this.contract
+  }
+
+  /** 契约文件的**实际来源路径**，供自检展示（未读到时为空）。 */
+  contractSourcePaths(): { soul?: string; agents?: string } {
+    return { ...(this.contractPaths ?? {}) }
+  }
+
+  /** 单个契约文件的读取：根目录优先，`openclaw/workspace/` 回退。 */
+  private async readContractFile(
+    name: string
+  ): Promise<{ content: string; path: string } | undefined> {
+    const rootPath = this.abs(name)
+    const rootContent = await readOptional(rootPath)
+    if (rootContent !== undefined) return { content: rootContent, path: rootPath }
+
+    const fallbackPath = this.abs(`${EASEL_WORKSPACE_DIR}/${name}`)
+    const fallbackContent = await readOptional(fallbackPath)
+    if (fallbackContent !== undefined) return { content: fallbackContent, path: fallbackPath }
+
+    return undefined
   }
 
   /**

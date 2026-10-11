@@ -34,6 +34,20 @@ export function embeddedEaselRoot(): string {
   return fileURLToPath(new URL('../vendor/easel/', import.meta.url))
 }
 
+/** 用户声明的额外渠道（自行补齐脚本后接入，无需改插件代码）。 */
+export interface ExtraChannelConfig {
+  id: string
+  name: string
+  /** Playwright 持久化目录名。 */
+  profile: string
+  supportsLogin?: boolean
+  supportsPublish?: boolean
+  /** 根相对脚本路径。 */
+  loginScript?: string
+  whoamiScript?: string
+  publishScript?: string
+}
+
 /** 插件运行期配置。 */
 export interface EaselConfig {
   /** 用户自备的 Easel 仓库绝对路径。设置后覆盖内置快照。 */
@@ -52,6 +66,10 @@ export interface EaselConfig {
   injectOrchestration?: boolean
   /** 是否在启动时把内置快照释放/更新到 workspaceDir。默认 true。 */
   releaseEmbedded?: boolean
+  /** 插件自有状态目录（登录会话、绑定表等）。默认 `~/.dsh/zmtgzt`。 */
+  dataDir?: string
+  /** 额外渠道声明。 */
+  extraChannels?: ExtraChannelConfig[]
 }
 
 /** 解析后的配置。 */
@@ -68,7 +86,9 @@ export interface ResolvedConfig {
   skillLayers: string[]
   injectOrchestration: boolean
   releaseEmbedded: boolean
-  /** 插件自有状态目录（仅工具自用，不承载画像/产物）。 */
+  /** 归一化后的额外渠道。 */
+  extraChannels: ExtraChannelConfig[]
+  /** 插件自有状态目录（工具自用，不承载画像/产物）。 */
   dataDir: string
 }
 
@@ -86,8 +106,34 @@ export function resolveConfig(input: EaselConfig | undefined): ResolvedConfig {
       : [],
     injectOrchestration: input?.injectOrchestration !== false,
     releaseEmbedded: input?.releaseEmbedded !== false,
-    dataDir: join(home, PLUGIN_ID),
+    extraChannels: normalizeExtraChannels(input?.extraChannels),
+    dataDir: absolutize(input?.dataDir) ?? join(home, PLUGIN_ID),
   }
+}
+
+/** 归一化额外渠道声明；缺 id/name/profile 的项直接丢弃。 */
+function normalizeExtraChannels(input: unknown): ExtraChannelConfig[] {
+  if (!Array.isArray(input)) return []
+  const out: ExtraChannelConfig[] = []
+  for (const raw of input) {
+    if (!raw || typeof raw !== 'object') continue
+    const item = raw as Record<string, unknown>
+    const id = typeof item.id === 'string' ? item.id.trim() : ''
+    const name = typeof item.name === 'string' ? item.name.trim() : ''
+    const profile = typeof item.profile === 'string' ? item.profile.trim() : ''
+    if (!id || !name || !profile) continue
+    out.push({
+      id,
+      name,
+      profile,
+      ...(item.supportsLogin === true ? { supportsLogin: true } : {}),
+      ...(item.supportsPublish === true ? { supportsPublish: true } : {}),
+      ...(typeof item.loginScript === 'string' ? { loginScript: item.loginScript } : {}),
+      ...(typeof item.whoamiScript === 'string' ? { whoamiScript: item.whoamiScript } : {}),
+      ...(typeof item.publishScript === 'string' ? { publishScript: item.publishScript } : {}),
+    })
+  }
+  return out
 }
 
 function absolutize(value: string | undefined): string | undefined {

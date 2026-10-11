@@ -48,7 +48,9 @@
     "check": "node --check lib/index.js && node --check lib/client.js",
     "smoke": "node scripts/smoke.mjs",
     "e2e": "node scripts/e2e.mjs",
-    "verify:real": "node scripts/verify-real-data.mjs"
+    "workbench": "node scripts/workbench.mjs",
+    "verify:real": "node scripts/verify-real-data.mjs",
+    "sync:easel": "node scripts/sync-easel.mjs"
   },
   "engines": {
     "dsh": ">=0.1.0-rc.6"

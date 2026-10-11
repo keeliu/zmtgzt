@@ -15,10 +15,25 @@
 # 想改用自备仓库或跟进最新上游：
 #   - 设置下面的 easelRoot 指向你 clone 的 Easel
 #   - 或运行 node scripts/sync-easel.mjs 更新内置快照
+#
+# 工作台入口注册在侧边栏（优先顶部动作槽位，回退 sidebar.footer.action），
+# 名称为「自媒体工作台」；账号、画像、主题三项在其中维护。
 - insert:
     - id: dsh-zmtgzt
       name: dsh-zmtgzt
       config:
         # easelRoot: /absolute/path/to/Easel   # 可选：自备仓库，覆盖内置快照
+        # workspaceDir: ~/.dsh/dsh-zmtgzt/easel # 可选：快照释放位置
+        # dataDir: ~/.dsh/dsh-zmtgzt            # 可选：插件状态目录（绑定表、登录会话）
         registerEaselSkills: true
         injectOrchestration: true
+        # 额外渠道（自行补齐脚本后接入，无需改插件代码）：
+        # extraChannels:
+        #   - id: toutiao
+        #     name: 今日头条
+        #     profile: ToutiaoProfile
+        #     supportsLogin: true
+        #     supportsPublish: true
+        #     loginScript: skills/shared/scripts/toutiao_publish.py
+        #     whoamiScript: skills/shared/scripts/toutiao_publish.py
+        #     publishScript: skills/shared/scripts/toutiao_publish.py

@@ -30,6 +30,53 @@ To use your own checkout instead (e.g. to track upstream closely), set `easelRoo
 
 Then run `zmtgzt_doctor` to confirm.
 
+## Creator Workbench
+
+The plugin registers a **sidebar** entry named「自媒体工作台」(Creator Workbench) — it no longer takes a
+conversation tab. Clicking it opens the workbench panel, organized as in-panel sub-navigation:
+
+| Sub-page | Purpose |
+| --- | --- |
+| Overview | Environment status, effective root, shortcuts |
+| Accounts | QR login / logout and login state for WeChat MP and Xiaohongshu |
+| Profiles | CRUD for the six profile dimensions (written to `profiles/<name>/*.md`) |
+| Topics | Create / delete topics, **bind a topic to the current session**, browse artifacts and manifest |
+| Doctor | Effective root and its source, actual contract paths, skill and script availability |
+
+### Topics and session binding
+
+A topic maps to `outputs/<topic-name>/`. Bind a topic to a session from the workbench and that session
+defaults to the topic's artifact directory. Bindings persist in `~/.dsh/dsh-zmtgzt/bindings.json`,
+so they survive a restart.
+
+Topic names must be human-readable: generic names like `test`, `tmp` or `xhs` are rejected
+(rules mirror Easel's `output_paths.py` rather than inventing a second convention).
+
+### Contract files now live at the workspace root
+
+On first release, `SOUL.md` and `AGENTS.md` are additionally copied to the **workspace root**
+(`~/.dsh/dsh-zmtgzt/easel/`) so you can see and edit them directly. Contract injection reads the root
+copy first, falling back to `openclaw/workspace/` only when it's absent.
+
+Your edits to the root copy are **never overwritten** by snapshot updates. The Doctor page shows
+exactly which copy is in effect.
+
+### Channel support status
+
+| Channel | Login / account | Publishing | Basis |
+| --- | --- | --- | --- |
+| WeChat MP | ✅ | ✅ | `weixin_mp_stats.py` provides `login` / `whoami` / `stats` / `publish` |
+| Xiaohongshu | ✅ | ✅ | `xhs_publish.py` provides `login` / `whoami` / `publish` |
+| Toutiao | ❌ | ❌ | Neither `web_publisher.py` nor `account_stats.py` lists `toutiao` in `PLATFORMS` |
+
+Toutiao isn't "coming later" — there is **no working implementation upstream**. The only script
+mentioning it, `multi_publish.py`, is marked unavailable by its own SKILL and depends on a Wechatsync
+extension. So the workbench renders no buttons for it, just the reason. If you supply your own script,
+declare it via `extraChannels` — no plugin changes needed.
+
+Publishing always passes through the existing gates: `content_guard.py` sensitive-content scan (hard
+block) and `persona_gate.py` persona check (advisory only). The plugin exposes **no bypass switch**.
+
 ## Tools
 
 ### Skill reading — the Easel skills, served from disk
