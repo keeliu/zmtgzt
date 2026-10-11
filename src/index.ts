@@ -14,6 +14,7 @@
  * @module dsh-zmtgzt
  */
 import { execFile } from 'node:child_process'
+import { existsSync, readFileSync } from 'node:fs'
 import { join } from 'node:path'
 import type { Context } from '@deepseek-ai/cordis'
 import { PLUGIN_ID, PLUGIN_VERSION, resolveConfig, type ZmtgztConfig } from './config.ts'
@@ -24,6 +25,13 @@ import { directorySize, ensureWorkspace, type WorkspaceInfo } from './workspace.
 import { AccountService } from './account.ts'
 import { TopicStore } from './topics.ts'
 import { SessionBindingStore } from './session-bindings.ts'
+import {
+  maskAppId,
+  readWechatConfig,
+  removeWechatAccount,
+  verifyWechatCredentials,
+  writeWechatAccount,
+} from './wechat-config.ts'
 
 export const name = PLUGIN_ID
 /** 工具注册依赖 tools 服务；skills / webServer 走响应式注入，允许晚于本插件启动。 */
@@ -136,7 +144,7 @@ export async function apply(ctx: Context, rawConfig?: ZmtgztConfig) {
       ctx.logger?.warn?.(`[${PLUGIN_ID}] ctx.webServer 不可用（headless profile？），跳过 HTTP 路由`)
       return
     }
-    registerRoutes(webServer, config, repo, doctor, account, topics, bindings)
+    registerRoutes(webServer, config, root, repo, doctor, account, topics, bindings)
     ctx.logger?.info?.(`[${PLUGIN_ID}] 路由已注册：${API_PREFIX}/*`)
   })
 }
@@ -274,6 +282,30 @@ function json(res: any, status: number, body: unknown): void {
   res.end(JSON.stringify(body))
 }
 
+/** 二进制响应（二维码 PNG 等）。 */
+function binary(res: any, status: number, contentType: string, body: Buffer): void {
+  res.writeHead(status, { 'content-type': contentType, 'cache-control': 'no-store' })
+  res.end(body)
+}
+
+/** 公众号官方 API 配置的脱敏状态——不回传 AppSecret 明文。 */
+function wechatStatus(root: string): Record<string, unknown> {
+  const view = readWechatConfig(root)
+  return {
+    path: view.path,
+    exists: view.exists,
+    defaultKey: view.defaultKey,
+    accounts: view.accounts.map((account) => ({
+      key: account.key,
+      appIdMasked: maskAppId(account.appId),
+      hasSecret: account.hasSecret,
+      author: account.author,
+      theme: account.theme,
+      configured: Boolean(account.appId && account.hasSecret),
+    })),
+  }
+}
+
 async function readJsonBody(req: any): Promise<Record<string, unknown>> {
   const chunks: Buffer[] = []
   for await (const chunk of req) chunks.push(typeof chunk === 'string' ? Buffer.from(chunk) : chunk)
@@ -289,13 +321,18 @@ async function readJsonBody(req: any): Promise<Record<string, unknown>> {
 function registerRoutes(
   webServer: any,
   config: ReturnType<typeof resolveConfig>,
+  /**
+   * 生效根：自备仓库或已释放的内置快照。
+   * 路由一律用它——**不能**用 `config.easelRoot`，后者在内置快照场景下是空的，
+   * 会让所有文件类路由误报「未配置」。
+   */
+  root: string,
   repo: EaselRepo,
   doctor: () => Promise<Record<string, unknown>>,
   account: AccountService,
   topics: TopicStore,
   bindings: SessionBindingStore
 ): void {
-  const root = config.easelRoot
 
   webServer.register({
     kind: 'exact',
@@ -490,8 +527,10 @@ function registerRoutes(
         }
         const body = await readJsonBody(req)
         const channelId = String(body.channelId ?? '')
-        const session = await account.startLogin(channelId)
+        const mode = body.mode === 'window' ? 'window' : 'qr'
+        const session = await account.startLogin(channelId, { mode })
         if ('error' in session) {
+          // 预检未通过时附带完整探测结果，前端可逐项展示缺失与修复命令
           json(res, 400, { ok: false, ...session })
           return
         }
@@ -499,6 +538,39 @@ function registerRoutes(
       } catch (error) {
         json(res, 500, { ok: false, error: String(error) })
       }
+    },
+  })
+
+  // 二维码图片：独立端点而非内嵌 base64 —— 状态轮询是高频的，
+  // 图片交给浏览器按需加载与缓存；且「图存在与否」与「状态」解耦，
+  // 状态说 qr_ready 而文件尚未落盘时这里返回 404，前端据此不渲染破图。
+  webServer.register({
+    kind: 'exact',
+    path: `${API_PREFIX}/account/login/qr`,
+    handler: (req: any, res: any) => {
+      const url = new URL(req.url ?? '/', 'http://dsh.internal')
+      const channelId = url.searchParams.get('channelId') ?? ''
+      try {
+        const qrPath = account.qrPath(channelId)
+        if (!channelId || !existsSync(qrPath)) {
+          json(res, 404, { ok: false, error: '二维码尚未生成' })
+          return
+        }
+        binary(res, 200, 'image/png', readFileSync(qrPath))
+      } catch (error) {
+        json(res, 500, { ok: false, error: String(error) })
+      }
+    },
+  })
+
+  // 登录脚本日志：脚本在写状态之前就退出时，这是唯一的排障线索
+  webServer.register({
+    kind: 'exact',
+    path: `${API_PREFIX}/account/login/log`,
+    handler: (req: any, res: any) => {
+      const url = new URL(req.url ?? '/', 'http://dsh.internal')
+      const channelId = url.searchParams.get('channelId') ?? ''
+      json(res, 200, { ok: true, ...account.readLoginLog(channelId) })
     },
   })
 
@@ -547,6 +619,82 @@ function registerRoutes(
         const url = new URL(req.url ?? '/', 'http://dsh.internal')
         const result = await account.stats(url.searchParams.get('channelId') ?? '')
         json(res, 200, result)
+      } catch (error) {
+        json(res, 500, { ok: false, error: String(error) })
+      }
+    },
+  })
+
+  // -------------------------------------------------------------------------
+  // 公众号「官方 API」凭证：读取状态 / 写入并校验 / 清除
+  //   与「扫码登录后台会话」并列，两种方式由用户按条件选择。
+  //   配置文件位置由上游 config.py 固定，插件必须写到那里。
+  // -------------------------------------------------------------------------
+
+  webServer.register({
+    kind: 'exact',
+    path: `${API_PREFIX}/account/wechat`,
+    handler: async (req: any, res: any) => {
+      try {
+        if (!root) {
+          json(res, 200, { ok: false, error: '生效根不可用', config: null })
+          return
+        }
+        if (req.method === 'GET') {
+          json(res, 200, { ok: true, config: wechatStatus(root) })
+          return
+        }
+        const body = await readJsonBody(req)
+        const key = String(body.key ?? 'default').trim() || 'default'
+        const appId = String(body.appId ?? '').trim()
+        const appSecret = String(body.appSecret ?? '').trim()
+        const author = String(body.author ?? '').trim()
+        const theme = String(body.theme ?? '').trim()
+        if (!appId || !appSecret) {
+          json(res, 400, { ok: false, error: 'AppID 与 AppSecret 均为必填。', config: wechatStatus(root) })
+          return
+        }
+        // 先校验再落盘：凭证无效时不写坏配置
+        const check = await verifyWechatCredentials(appId, appSecret)
+        if (!check.ok) {
+          json(res, 400, {
+            ok: false,
+            error: check.message,
+            ...(check.hint ? { hint: check.hint } : {}),
+            check,
+            config: wechatStatus(root),
+          })
+          return
+        }
+        const written = writeWechatAccount(root, { key, appId, appSecret, author, theme })
+        if (!written.ok) {
+          json(res, 500, { ok: false, error: written.error ?? '写入失败', config: wechatStatus(root) })
+          return
+        }
+        json(res, 200, { ok: true, check, written, config: wechatStatus(root) })
+      } catch (error) {
+        json(res, 500, { ok: false, error: String(error) })
+      }
+    },
+  })
+
+  webServer.register({
+    kind: 'exact',
+    path: `${API_PREFIX}/account/wechat/remove`,
+    handler: async (req: any, res: any) => {
+      try {
+        if (!root) {
+          json(res, 200, { ok: false, error: '生效根不可用' })
+          return
+        }
+        const body = await readJsonBody(req)
+        const key = String(body.key ?? '').trim()
+        if (!key) {
+          json(res, 400, { ok: false, error: 'key 必填' })
+          return
+        }
+        const result = removeWechatAccount(root, key)
+        json(res, result.ok ? 200 : 500, { ...result, config: wechatStatus(root) })
       } catch (error) {
         json(res, 500, { ok: false, error: String(error) })
       }

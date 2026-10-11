@@ -38,6 +38,9 @@ await build({
   platform: 'node',
   format: 'esm',
   target: ['node22'],
+  // 产物按 UTF-8 输出：界面与提示大量使用中文，转义成 \uXXXX 只会让产物更难读、
+  // 体积更大，且不利于按文本做回归断言。
+  charset: 'utf8',
   define: { __EASEL_VERSION__: JSON.stringify(pkg.version) },
   external: ['@deepseek-ai/*', 'node:*'],
   loader: { '.md': 'text' },
@@ -53,6 +56,7 @@ await build({
   format: 'cjs',
   target: ['es2022'],
   jsx: 'automatic',
+  charset: 'utf8',
   define: { __EASEL_VERSION__: JSON.stringify(pkg.version) },
   external: [
     '@deepseek-ai/*',

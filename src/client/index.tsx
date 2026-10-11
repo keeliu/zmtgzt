@@ -218,6 +218,80 @@ class PaneBoundary extends Component<{ children?: ReactNode }, { error: Error | 
   }
 }
 
+/**
+ * 内联新建表单。
+ *
+ * 为什么不用 `window.prompt`：DSH Web 可能跑在 Electron 里，而 **Electron 不支持
+ * 同步对话框** —— `prompt()` 直接返回 `null` 且不显示窗口，调用处若只做
+ * `if (!name) return` 便表现为「点了新建没反应」（这正是用户报告的问题）。
+ *
+ * 换成受控输入还有额外好处：能就地显示服务端返回的校验错误
+ * （例如主题名不合法的原因），原生 `prompt` 做不到。
+ */
+function InlineForm({
+  placeholder,
+  submitLabel = '确定',
+  onSubmit,
+  onCancel,
+}: {
+  placeholder?: string
+  submitLabel?: string
+  /** 校验失败请抛错，错误信息会就地展示。 */
+  onSubmit: (value: string) => Promise<void>
+  onCancel: () => void
+}) {
+  const [value, setValue] = useState('')
+  const [busy, setBusy] = useState(false)
+  const [error, setError] = useState('')
+
+  const submit = async () => {
+    const trimmed = value.trim()
+    if (!trimmed) {
+      setError('名称不能为空')
+      return
+    }
+    setBusy(true)
+    setError('')
+    try {
+      await onSubmit(trimmed)
+      onCancel()
+    } catch (err) {
+      setError(err instanceof Error ? err.message : String(err))
+    } finally {
+      setBusy(false)
+    }
+  }
+
+  return (
+    <div style={S.inlineForm}>
+      <input
+        autoFocus
+        style={S.input}
+        placeholder={placeholder}
+        value={value}
+        disabled={busy}
+        onChange={(event) => {
+          setValue(event.target.value)
+          if (error) setError('')
+        }}
+        onKeyDown={(event) => {
+          if (event.key === 'Enter') void submit()
+          if (event.key === 'Escape') onCancel()
+        }}
+      />
+      <div style={S.row}>
+        <button style={S.primaryBtn} disabled={busy} onClick={() => void submit()}>
+          {busy ? '处理中…' : submitLabel}
+        </button>
+        <button style={S.ghostBtn} disabled={busy} onClick={onCancel}>
+          取消
+        </button>
+      </div>
+      {error && <p style={S.errorText}>{error}</p>}
+    </div>
+  )
+}
+
 // ---------------------------------------------------------------------------
 // 总览
 // ---------------------------------------------------------------------------
@@ -294,10 +368,55 @@ interface ChannelRow {
   profileDir: string
 }
 
+/** 预检单项（与 src/preflight.ts 的 ProbeResult 对应）。 */
+interface ProbeView {
+  name: string
+  ok: boolean
+  detail?: string
+  fix?: string
+}
+
+/** 一次登录会话的界面状态。 */
+interface LoginUiState {
+  channelId: string
+  mode: 'qr' | 'window'
+  state: string
+  message: string
+  /** 打破二维码 img 缓存的序号（重新发起时递增）。 */
+  nonce: number
+  /** 预检未通过时的探测明细。 */
+  probes?: ProbeView[]
+  hint?: string
+}
+
+/** 需要渲染二维码的登录状态。 */
+const QR_STATES = new Set(['qr_ready', 'window_login'])
+/** 终止轮询的登录状态。 */
+const TERMINAL_STATES = new Set(['success', 'expired', 'error'])
+
+/** 公众号官方 API 的账号视图（不含密钥明文）。 */
+interface WechatAccountView {
+  key: string
+  appIdMasked: string
+  hasSecret: boolean
+  author: string
+  theme: string
+  configured: boolean
+}
+
+interface WechatConfigView {
+  path: string
+  exists: boolean
+  defaultKey: string
+  accounts: WechatAccountView[]
+}
+
 function AccountPane() {
   const [channels, setChannels] = useState<ChannelRow[]>([])
   const [status, setStatus] = useState('')
-  const [login, setLogin] = useState<{ channelId: string; state: string; message: string } | null>(null)
+  const [login, setLogin] = useState<LoginUiState | null>(null)
+  const [log, setLog] = useState<{ channelId: string; content: string; path: string } | null>(null)
+  const [wechat, setWechat] = useState<WechatConfigView | null>(null)
   const pollRef = useRef<number | null>(null)
 
   const stopPolling = useCallback(() => {
@@ -315,6 +434,13 @@ function AccountPane() {
     } catch (error) {
       setStatus(`读取失败：${String(error)}`)
     }
+    // 公众号官方 API 的配置状态（脱敏）；失败不影响渠道列表展示
+    try {
+      const res = await api<{ ok: boolean; config: WechatConfigView | null }>('/account/wechat')
+      setWechat(res.config ?? null)
+    } catch {
+      setWechat(null)
+    }
   }, [])
 
   useEffect(() => {
@@ -322,33 +448,78 @@ function AccountPane() {
     return stopPolling
   }, [load, stopPolling])
 
-  const startLogin = async (id: string) => {
+  const startLogin = async (id: string, mode: 'qr' | 'window' = 'qr') => {
     try {
-      const res = await api<{ ok: boolean; error?: string; hint?: string }>('/account/login', {
+      const res = await api<{
+        ok: boolean
+        error?: string
+        hint?: string
+        preflight?: { probes?: ProbeView[] }
+      }>('/account/login', {
         method: 'POST',
-        body: JSON.stringify({ channelId: id }),
+        body: JSON.stringify({ channelId: id, mode }),
       })
       if (!res.ok) {
-        setStatus(res.error ?? '发起登录失败')
+        // 预检未通过：逐项展示缺失依赖与修复命令，而不是笼统报「失败」
+        setLogin({
+          channelId: id,
+          mode,
+          state: 'error',
+          message: res.error ?? '发起登录失败',
+          nonce: Date.now(),
+          ...(res.preflight?.probes ? { probes: res.preflight.probes } : {}),
+          ...(res.hint ? { hint: res.hint } : {}),
+        })
         return
       }
-      setLogin({ channelId: id, state: 'starting', message: '已启动扫码流程…' })
+      setLog(null)
+      setLogin({ channelId: id, mode, state: 'starting', message: '已启动登录流程…', nonce: Date.now() })
       stopPolling()
       pollRef.current = window.setInterval(async () => {
-        const st = await api<{ state: string; message: string }>(
-          `/account/login/status?channelId=${encodeURIComponent(id)}`
-        )
-        setLogin({ channelId: id, state: st.state, message: st.message })
-        if (st.state === 'success') {
-          stopPolling()
-          setLogin(null)
-          await load()
-        } else if (st.state === 'expired' || st.state === 'error') {
-          stopPolling()
+        try {
+          const st = await api<{ state: string; message: string }>(
+            `/account/login/status?channelId=${encodeURIComponent(id)}`
+          )
+          setLogin((prev) => {
+            if (!prev) return prev
+            const changed = prev.state !== st.state
+            return {
+              ...prev,
+              state: st.state,
+              message: st.message,
+              // 仅在状态变化时换 nonce，避免每 2 秒重新拉一次二维码图片
+              ...(changed ? { nonce: Date.now() } : {}),
+            }
+          })
+          if (st.state === 'success') {
+            stopPolling()
+            setLogin(null)
+            await load()
+          } else if (TERMINAL_STATES.has(st.state)) {
+            stopPolling()
+          }
+        } catch {
+          /* 单次轮询失败不终止，下一轮继续 */
         }
       }, 2000)
     } catch (error) {
       setStatus(`发起登录失败：${String(error)}`)
+    }
+  }
+
+  /** 读取登录脚本日志——脚本在写状态前就退出时，这是唯一的线索。 */
+  const showLog = async (id: string) => {
+    try {
+      const res = await api<{ path: string; content: string; exists: boolean }>(
+        `/account/login/log?channelId=${encodeURIComponent(id)}`
+      )
+      setLog({
+        channelId: id,
+        path: res.path,
+        content: res.exists ? res.content || '（日志为空）' : '（尚无日志：本次会话还没发起过登录）',
+      })
+    } catch (error) {
+      setLog({ channelId: id, path: '', content: `读取日志失败：${String(error)}` })
     }
   }
 
@@ -396,8 +567,11 @@ function AccountPane() {
           {channel.supportsLogin && (
             <>
               <div style={S.row}>
-                <button style={S.ghostBtn} onClick={() => void startLogin(channel.id)}>
+                <button style={S.ghostBtn} onClick={() => void startLogin(channel.id, 'qr')}>
                   扫码登录
+                </button>
+                <button style={S.ghostBtn} onClick={() => void startLogin(channel.id, 'window')}>
+                  窗口登录
                 </button>
                 {channel.profilePresent && (
                   <button style={S.dangerBtn} onClick={() => void logout(channel.id)}>
@@ -408,23 +582,285 @@ function AccountPane() {
               <span style={S.mono}>{channel.profileDir}</span>
             </>
           )}
+
+          {/* 公众号额外提供「官方 API 凭证」方式，与扫码后台会话并列 */}
+          {channel.id === 'wechat-mp' && (
+            <WechatApiSection config={wechat} onRefresh={() => void load()} />
+          )}
         </div>
       ))}
 
-      {login && (
+      {login && <LoginSessionCard login={login} onShowLog={showLog} />}
+
+      {log && (
         <div style={S.card}>
-          <strong>扫码登录中（{login.channelId}）</strong>
-          <p style={S.muted}>
-            状态：{login.state}
-            {login.message ? ` · ${login.message}` : ''}
-          </p>
-          <p style={S.muted}>
-            二维码由登录脚本生成在插件数据目录。长时间无进展请检查 Python 与 Playwright 是否就绪。
-          </p>
+          <div style={S.row}>
+            <strong>登录日志（{log.channelId}）</strong>
+            <button style={S.linkBtn} onClick={() => setLog(null)}>
+              收起
+            </button>
+          </div>
+          {log.path && <p style={S.mono}>{log.path}</p>}
+          <pre style={S.logBox}>{log.content}</pre>
         </div>
       )}
 
       {status && <p style={S.muted}>{status}</p>}
+    </div>
+  )
+}
+
+/** 登录会话卡片：二维码、状态机进度、预检明细与日志入口。 */
+function LoginSessionCard({
+  login,
+  onShowLog,
+}: {
+  login: LoginUiState
+  onShowLog: (id: string) => void
+}) {
+  const showQr = QR_STATES.has(login.state)
+  return (
+    <div style={S.card}>
+      <div style={S.row}>
+        <strong>
+          登录中（{login.channelId} · {login.mode === 'window' ? '窗口登录' : '扫码登录'}）
+        </strong>
+        <span style={{ ...S.badge, ...(login.state === 'error' ? S.badgeBad : S.badgeMuted) }}>
+          {login.state}
+        </span>
+      </div>
+
+      {login.message && <p style={S.muted}>{login.message}</p>}
+
+      {showQr && (
+        <div style={S.qrWrap}>
+          <img
+            key={login.nonce}
+            src={`${API}/account/login/qr?channelId=${encodeURIComponent(login.channelId)}&n=${login.nonce}`}
+            alt="登录二维码"
+            style={S.qrImg}
+            onError={(event) => {
+              // 状态说 qr_ready 但文件可能稍后才落盘，此时不显示破图
+              event.currentTarget.style.visibility = 'hidden'
+            }}
+            onLoad={(event) => {
+              event.currentTarget.style.visibility = 'visible'
+            }}
+          />
+          <p style={S.muted}>
+            用手机扫描上方二维码完成登录。二维码有时效（约几分钟），过期请重新发起。
+          </p>
+        </div>
+      )}
+
+      {login.state === 'window_login' && (
+        <p style={S.muted}>
+          请在弹出的浏览器窗口中完成登录（扫码或短信验证），不要关闭那个窗口。
+        </p>
+      )}
+
+      {login.state === 'unknown' && (
+        <p style={S.muted}>
+          未读到登录状态：脚本可能尚未启动或已提前退出。请查看下方登录日志确认原因。
+        </p>
+      )}
+
+      {/* 环境预检未通过：逐项列出缺失项与修复命令 */}
+      {login.probes && login.probes.length > 0 && (
+        <div style={S.subCard}>
+          <strong style={{ fontSize: 12 }}>环境预检</strong>
+          {login.probes.map((probe) => (
+            <div key={probe.name} style={S.probeRow}>
+              <span style={{ ...S.dot, background: probe.ok ? '#2da44e' : '#cf222e' }} />
+              <span style={S.probeName}>{probe.name}</span>
+              <span style={S.muted}>{probe.detail ?? ''}</span>
+              {probe.fix && <span style={S.fixText}>→ {probe.fix}</span>}
+            </div>
+          ))}
+        </div>
+      )}
+
+      {login.hint && <p style={S.hint}>{login.hint}</p>}
+
+      <div style={S.row}>
+        <button style={S.ghostBtn} onClick={() => onShowLog(login.channelId)}>
+          查看登录日志
+        </button>
+      </div>
+    </div>
+  )
+}
+
+/**
+ * 公众号「官方 API」凭证区。
+ *
+ * 与「扫码登录后台会话」并列：两种方式由用户按条件选择。
+ * 后台会话免凭证与白名单；官方 API 需要 AppID/AppSecret 且需登记出口 IP。
+ */
+function WechatApiSection({
+  config,
+  onRefresh,
+}: {
+  config: WechatConfigView | null
+  onRefresh: () => void
+}) {
+  const [open, setOpen] = useState(false)
+  const [key, setKey] = useState('default')
+  const [appId, setAppId] = useState('')
+  const [appSecret, setAppSecret] = useState('')
+  const [author, setAuthor] = useState('')
+  const [theme, setTheme] = useState('')
+  const [busy, setBusy] = useState(false)
+  const [error, setError] = useState('')
+  const [hint, setHint] = useState('')
+  const [done, setDone] = useState('')
+
+  const accounts = config?.accounts ?? []
+
+  const submit = async () => {
+    setError('')
+    setHint('')
+    setDone('')
+    if (!appId.trim() || !appSecret.trim()) {
+      setError('AppID 与 AppSecret 均为必填。')
+      return
+    }
+    setBusy(true)
+    try {
+      const res = await api<{ ok: boolean; error?: string; hint?: string }>('/account/wechat', {
+        method: 'POST',
+        body: JSON.stringify({ key: key.trim() || 'default', appId, appSecret, author, theme }),
+      })
+      if (!res.ok) {
+        setError(res.error ?? '保存失败')
+        if (res.hint) setHint(res.hint)
+        return
+      }
+      setAppSecret('')
+      setDone('凭证已保存，并已通过微信接口校验。')
+      onRefresh()
+    } catch (err) {
+      setError(String(err))
+    } finally {
+      setBusy(false)
+    }
+  }
+
+  const remove = async (accountKey: string) => {
+    setBusy(true)
+    setError('')
+    setDone('')
+    try {
+      await api('/account/wechat/remove', {
+        method: 'POST',
+        body: JSON.stringify({ key: accountKey }),
+      })
+      onRefresh()
+    } catch (err) {
+      setError(String(err))
+    } finally {
+      setBusy(false)
+    }
+  }
+
+  return (
+    <div style={S.subCard}>
+      <div style={S.row}>
+        <strong style={{ fontSize: 13 }}>官方 API 凭证（另一种方式）</strong>
+        <button style={S.linkBtn} onClick={() => setOpen(!open)}>
+          {open ? '收起' : '配置'}
+        </button>
+      </div>
+      <p style={S.muted}>
+        上面的「扫码登录」走公众号后台会话，免 AppID/AppSecret、免 IP 白名单。
+        也可改用官方 HTTP API：需填写 AppID 与 AppSecret，并把本机出口 IP
+        加进公众号后台的 IP 白名单。两种方式任选其一即可。
+      </p>
+
+      {accounts.length > 0 && (
+        <div style={S.stack}>
+          {accounts.map((account) => (
+            <div key={account.key} style={S.row}>
+              <span style={{ ...S.badge, ...(account.configured ? S.badgeOk : S.badgeWarn) }}>
+                {account.configured ? '凭证已配置' : '缺少密钥'}
+              </span>
+              <span style={S.mono}>
+                {account.key}
+                {account.appIdMasked ? ` · AppID ${account.appIdMasked}` : ''}
+              </span>
+              <button style={S.dangerBtn} disabled={busy} onClick={() => void remove(account.key)}>
+                清除
+              </button>
+            </div>
+          ))}
+        </div>
+      )}
+
+      {open && (
+        <div style={S.stack}>
+          <div style={S.formGrid}>
+            <label style={S.label}>
+              账号键（对应配置里的 accounts 键名）
+              <input
+                style={S.input}
+                value={key}
+                placeholder="default"
+                onChange={(event) => setKey(event.target.value)}
+              />
+            </label>
+            <label style={S.label}>
+              AppID
+              <input
+                style={S.input}
+                value={appId}
+                placeholder="wx 开头的一串字符"
+                onChange={(event) => setAppId(event.target.value)}
+              />
+            </label>
+            <label style={S.label}>
+              AppSecret
+              <input
+                style={S.input}
+                type="password"
+                value={appSecret}
+                placeholder="只在重置时显示一次，请从后台复制"
+                onChange={(event) => setAppSecret(event.target.value)}
+              />
+            </label>
+            <label style={S.label}>
+              作者名（可选）
+              <input
+                style={S.input}
+                value={author}
+                onChange={(event) => setAuthor(event.target.value)}
+              />
+            </label>
+            <label style={S.label}>
+              排版主题（可选）
+              <input
+                style={S.input}
+                value={theme}
+                onChange={(event) => setTheme(event.target.value)}
+              />
+            </label>
+          </div>
+
+          <div style={S.row}>
+            <button style={S.primaryBtn} disabled={busy} onClick={() => void submit()}>
+              {busy ? '校验并保存中…' : '校验并保存'}
+            </button>
+            <span style={S.muted}>保存前会调用微信接口校验凭证有效性</span>
+          </div>
+        </div>
+      )}
+
+      {error && <p style={S.errorText}>{error}</p>}
+      {hint && <p style={S.hint}>{hint}</p>}
+      {done && <p style={S.okText}>{done}</p>}
+      {config?.path && <span style={S.mono}>配置文件：{config.path}</span>}
+      <p style={S.muted}>
+        说明：按上游约定，AppSecret 以明文保存在该 YAML 中（微信官方 API 的常规做法）。
+      </p>
     </div>
   )
 }
@@ -450,6 +886,7 @@ function ProfilePane() {
   const [dims, setDims] = useState<Partial<Record<Dimension, string>>>({})
   const [dirty, setDirty] = useState<Dimension | null>(null)
   const [status, setStatus] = useState('')
+  const [creating, setCreating] = useState(false)
 
   const load = useCallback(async () => {
     try {
@@ -490,30 +927,30 @@ function ProfilePane() {
     }
   }
 
-  const createProfile = async () => {
-    const name = window.prompt('新画像名称（如「职场干货」）')
-    if (!name || !name.trim()) return
-    try {
-      await api('/profile', {
-        method: 'POST',
-        body: JSON.stringify({ name: name.trim(), file: 'identity', content: '' }),
-      })
-      await load()
-      await open(name.trim())
-    } catch (error) {
-      setStatus(`创建失败：${String(error)}`)
-    }
-  }
-
   return (
     <div style={S.split}>
       <div style={S.listCol}>
         <div style={S.colHead}>
           <span>画像（{profiles.length}）</span>
-          <button style={S.linkBtn} onClick={() => void createProfile()}>
-            新建
+          <button style={S.linkBtn} onClick={() => setCreating(!creating)}>
+            {creating ? '取消' : '新建'}
           </button>
         </div>
+        {creating && (
+          <InlineForm
+            placeholder="新画像名称（如「职场干货」）"
+            submitLabel="创建"
+            onCancel={() => setCreating(false)}
+            onSubmit={async (value) => {
+              await api('/profile', {
+                method: 'POST',
+                body: JSON.stringify({ name: value, file: 'identity', content: '' }),
+              })
+              await load()
+              await open(value)
+            }}
+          />
+        )}
         {profiles.length === 0 && <p style={S.muted}>还没有画像。新建一个，内容创作会读它。</p>}
         {profiles.map((item) => (
           <button
@@ -574,6 +1011,9 @@ function TopicPane() {
   const [entries, setEntries] = useState<Array<{ name: string; isDir: boolean; size: number }>>([])
   const [steps, setSteps] = useState<Array<Record<string, unknown>>>([])
   const [status, setStatus] = useState('')
+  const [creating, setCreating] = useState(false)
+  /** 待二次确认删除的主题名。 */
+  const [confirming, setConfirming] = useState<string | null>(null)
 
   const load = useCallback(async () => {
     try {
@@ -602,25 +1042,9 @@ function TopicPane() {
     }
   }
 
-  const createTopic = async () => {
-    const name = window.prompt('新主题名称（人类可读的具体名称，如「春季通勤穿搭」）')
-    if (!name || !name.trim()) return
-    const res = await api<{ ok: boolean; reason?: string }>('/topic', {
-      method: 'POST',
-      body: JSON.stringify({ action: 'create', name: name.trim() }),
-    })
-    if (!res.ok) {
-      setStatus(res.reason ?? '创建失败')
-      return
-    }
-    setStatus('')
-    await load()
-    await openTopic(name.trim())
-  }
-
   const removeTopic = async (name: string) => {
-    if (!window.confirm(`确认删除主题「${name}」及其全部产物？`)) return
     await api('/topic', { method: 'POST', body: JSON.stringify({ action: 'remove', name }) })
+    setConfirming(null)
     if (active === name) {
       setActive('')
       setEntries([])
@@ -654,10 +1078,26 @@ function TopicPane() {
       <div style={S.listCol}>
         <div style={S.colHead}>
           <span>主题（{topics.length}）</span>
-          <button style={S.linkBtn} onClick={() => void createTopic()}>
-            新建
+          <button style={S.linkBtn} onClick={() => setCreating(!creating)}>
+            {creating ? '取消' : '新建'}
           </button>
         </div>
+        {creating && (
+          <InlineForm
+            placeholder="新主题名称（如「春季通勤穿搭」）"
+            submitLabel="创建"
+            onCancel={() => setCreating(false)}
+            onSubmit={async (value) => {
+              const res = await api<{ ok: boolean; reason?: string }>('/topic', {
+                method: 'POST',
+                body: JSON.stringify({ action: 'create', name: value }),
+              })
+              if (!res.ok) throw new Error(res.reason ?? '创建失败')
+              await load()
+              await openTopic(value)
+            }}
+          />
+        )}
         {topics.length === 0 && (
           <p style={S.muted}>
             还没有主题。主题对应 outputs/&lt;主题名&gt;/，绑定会话后产物会落到该目录。
@@ -691,9 +1131,21 @@ function TopicPane() {
               <button style={S.ghostBtn} onClick={() => void unbind()}>
                 解除绑定
               </button>
-              <button style={S.dangerBtn} onClick={() => void removeTopic(active)}>
-                删除主题
-              </button>
+              {/* 破坏性操作走界面内二次确认，不用 window.confirm（Electron 不可靠） */}
+              {confirming === active ? (
+                <>
+                  <button style={S.dangerBtn} onClick={() => void removeTopic(active)}>
+                    确认删除「{active}」（不可恢复）
+                  </button>
+                  <button style={S.ghostBtn} onClick={() => setConfirming(null)}>
+                    取消
+                  </button>
+                </>
+              ) : (
+                <button style={S.ghostBtn} onClick={() => setConfirming(active)}>
+                  删除主题
+                </button>
+              )}
             </div>
 
             <h4 style={S.sectionTitle}>执行记录</h4>
@@ -993,4 +1445,54 @@ const S: Record<string, React.CSSProperties> = {
     flexDirection: 'column',
     gap: 4,
   },
+
+  // --- 内联表单 ---
+  inlineForm: {
+    display: 'flex',
+    flexDirection: 'column',
+    gap: 6,
+    padding: '8px 10px',
+    borderRadius: 8,
+    border: `1px solid ${border}`,
+    background: subtle,
+  },
+  formGrid: { display: 'flex', flexDirection: 'column', gap: 8 },
+  errorText: { margin: 0, fontSize: 12, color: '#cf222e' },
+  okText: { margin: 0, fontSize: 12, color: '#2da44e' },
+
+  // --- 登录会话：二维码、预检、日志 ---
+  subCard: {
+    display: 'flex',
+    flexDirection: 'column',
+    gap: 6,
+    padding: '8px 10px',
+    marginTop: 6,
+    borderRadius: 8,
+    border: `1px dashed ${border}`,
+  },
+  qrWrap: { display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 6, padding: '8px 0' },
+  qrImg: {
+    width: 200,
+    height: 200,
+    objectFit: 'contain',
+    borderRadius: 8,
+    background: '#ffffff',
+    padding: 6,
+    border: `1px solid ${border}`,
+  },
+  logBox: {
+    margin: 0,
+    maxHeight: 240,
+    overflow: 'auto',
+    padding: 8,
+    borderRadius: 6,
+    background: subtle,
+    fontFamily: 'ui-monospace, monospace',
+    fontSize: 11,
+    whiteSpace: 'pre-wrap',
+    wordBreak: 'break-all',
+  },
+  probeRow: { display: 'flex', alignItems: 'center', gap: 6, flexWrap: 'wrap', fontSize: 12 },
+  probeName: { minWidth: 150 },
+  fixText: { fontSize: 11, opacity: 0.8, fontFamily: 'ui-monospace, monospace' },
 }

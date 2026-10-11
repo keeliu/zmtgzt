@@ -65,7 +65,7 @@ dsh plugin add dsh-zmtgzt
 
 | 渠道 | 登录与账号维护 | 发布 | 依据 |
 | --- | --- | --- | --- |
-| 微信公众号 | ✅ | ✅ | `weixin_mp_stats.py` 提供 `login` / `whoami` / `stats` / `publish` |
+| 微信公众号 | ✅ 两种方式 | ✅ | `weixin_mp_stats.py` 的 `login` / `whoami` / `stats` / `publish`；另有官方 API 路径，见下 |
 | 小红书 | ✅ | ✅ | `xhs_publish.py` 提供 `login` / `whoami` / `publish` |
 | 今日头条 | ❌ | ❌ | `web_publisher.py` 与 `account_stats.py` 的平台表中都**没有** `toutiao` |
 
@@ -75,6 +75,36 @@ SKILL 标注为「当前环境不可用」，且依赖 Wechatsync 扩展。所�
 
 发布链路必经既有门禁：`content_guard.py` 的敏感信息扫描（硬拦）与 `persona_gate.py` 的
 人设检查（只提醒不阻断），插件**不提供绕过开关**。
+
+### 公众号：两种登录方式任选
+
+| 方式 | 需要什么 | 适合 |
+| --- | --- | --- |
+| **扫码登录后台会话** | 一个能扫码的微信 | 默认。免 AppID/AppSecret、免 IP 白名单 |
+| **官方 API 凭证** | AppID + AppSecret，并把本机出口 IP 加进公众号后台白名单 | 无人值守/自动化；或不依赖浏览器会话 |
+
+第二种在账号页的公众号卡片里填写，保存前会调用微信 `cgi-bin/token` 校验。凭证写入上游
+唯一识别的路径 `skills/openclaw/skill-wechat-publisher/wechat-publisher.yaml`；写入采用
+**行级补丁**并留 `.bak` 备份，因此不会动你在该文件里的其它账号、`image_generation` 等
+其它顶层键，也不会丢注释。
+
+校验失败按错误码分开提示：`40001`/`40002` 是凭证问题；**`40164` 是「凭证本身正确、
+但出口 IP 未登记白名单」**——两者不能混为一谈，否则你会反复核对 AppID/Secret 却找不到原因。
+
+> 按上游约定，AppSecret 在该 YAML 中为明文存储（微信官方 API 的常规做法）。
+> 插件不回传明文到前端，只显示脱敏后的 AppID。
+
+### 登录排障
+
+点登录没出二维码时，按这个顺序看：
+
+1. **界面会先做环境预检**。缺 Python / `playwright` / `opencv-python` / `Pillow` 时，
+   插件**不启动注定失败的登录进程**，而是逐项列出缺失项与安装命令。
+   - headless 扫码需要 `opencv-python` 与 `Pillow` 把二维码从页面里抠出来；
+   - 不想装这两个，用「**窗口登录**」按钮，弹出浏览器窗口在窗口内扫码/短信登录。
+2. **每次登录的脚本输出都落盘**：`<插件数据目录>/login/<渠道>.log`，界面上有「查看登录日志」。
+   上游脚本在写第一个状态之前就可能因缺依赖退出——没有日志就只能看到 `unknown`。
+3. 二维码图片经 `/api/zmtgzt/account/login/qr` 提供，**未生成时返回 404**，界面据此不渲染破图。
 
 ## 工具
 

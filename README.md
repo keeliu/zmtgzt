@@ -65,7 +65,7 @@ exactly which copy is in effect.
 
 | Channel | Login / account | Publishing | Basis |
 | --- | --- | --- | --- |
-| WeChat MP | ✅ | ✅ | `weixin_mp_stats.py` provides `login` / `whoami` / `stats` / `publish` |
+| WeChat MP | ✅ two ways | ✅ | `weixin_mp_stats.py` provides `login` / `whoami` / `stats` / `publish`; plus an official-API path, below |
 | Xiaohongshu | ✅ | ✅ | `xhs_publish.py` provides `login` / `whoami` / `publish` |
 | Toutiao | ❌ | ❌ | Neither `web_publisher.py` nor `account_stats.py` lists `toutiao` in `PLATFORMS` |
 
@@ -76,6 +76,43 @@ declare it via `extraChannels` — no plugin changes needed.
 
 Publishing always passes through the existing gates: `content_guard.py` sensitive-content scan (hard
 block) and `persona_gate.py` persona check (advisory only). The plugin exposes **no bypass switch**.
+
+### WeChat MP: pick either login route
+
+| Route | What it needs | Best for |
+| --- | --- | --- |
+| **Scan to log in (backend session)** | A phone that can scan | Default. No AppID/AppSecret, no IP allowlist |
+| **Official API credentials** | AppID + AppSecret, plus this machine's egress IP added to the MP allowlist | Unattended/automated use, or no browser session |
+
+The second is entered on the MP card in the Accounts page and is verified against WeChat's
+`cgi-bin/token` before saving. Credentials go to the one path upstream recognises,
+`skills/openclaw/skill-wechat-publisher/wechat-publisher.yaml`, written with a **line-level patch**
+and a `.bak` backup — so your other accounts, other top-level keys such as `image_generation`, and
+your comments are all left alone.
+
+Verification failures are reported per error code: `40001`/`40002` mean bad credentials, while
+**`40164` means "credentials are fine, the egress IP isn't allowlisted"** — conflating the two sends
+you hunting through AppID/AppSecret for nothing.
+
+> As per upstream convention, the AppSecret is stored in plain text in that YAML (standard practice
+> for the WeChat official API). The plugin never returns it to the frontend, only a masked AppID.
+
+### Troubleshooting login
+
+When no QR code appears, check in this order:
+
+1. **The UI runs an environment preflight first.** If Python / `playwright` / `opencv-python` /
+   `Pillow` are missing, the plugin **does not start a doomed login process** — it lists the missing
+   items with install commands.
+   - Headless scanning needs `opencv-python` and `Pillow` to crop the QR code out of the page.
+   - Prefer not to install them? Use **Window login**, which opens a real browser window for you to
+     scan or confirm by SMS.
+2. **Every login's script output is written to disk**: `<plugin data dir>/login/<channel>.log`,
+   reachable via "View login log" in the UI. Upstream's script can exit before writing its first
+   status — without the log you'd only ever see `unknown`.
+3. The QR image is served from `/api/zmtgzt/account/login/qr` and **returns 404 when not yet
+   generated**, so the UI never renders a broken image.
+
 
 ## Tools
 

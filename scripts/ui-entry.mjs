@@ -239,6 +239,19 @@ for (const legacy of ['sidebar.header.action', 'shell.overlay', 'conversation.vi
 }
 
 // ---------------------------------------------------------------------------
+console.log('\n[E] 内联表单（不依赖原生对话框）')
+// ---------------------------------------------------------------------------
+
+// Electron 不支持 window.prompt（返回 null 且不弹窗），
+// 旧实现因此表现为「点新建没反应」；产物里不允许再出现这些调用。
+for (const legacy of ['window.prompt', 'window.confirm', 'window.alert']) {
+  check(`产物中不含 ${legacy}`, !clientSource.includes(legacy))
+}
+check('存在内联表单实现', clientSource.includes('InlineForm'))
+check('新建走内联表单（含校验提示）', clientSource.includes('名称不能为空'))
+check('删除走界面内二次确认', clientSource.includes('确认删除'))
+
+// ---------------------------------------------------------------------------
 
 console.log('')
 if (failures.length) {
