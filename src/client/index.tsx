@@ -1,13 +1,23 @@
 /**
- * 客户端半：侧边栏入口 + 「自媒体工作台」面板。
+ * 客户端半：左侧导航「自媒体工作台」入口 + 主区域工作台面板。
  *
- * 相比上一版的三点变化：
- *   1. 入口从 `conversation.view`（会话页签）迁到**侧边栏动作区**，不再与对话界面争位置
- *   2. 功能从单页扩为多子页面：总览 / 账号 / 画像 / 主题 / 环境自检
- *   3. 配色全部走 DSH 主题令牌，不写死颜色
+ * 入口走**官方两段式注册**（与内置「插件」条目同一机制，见
+ * `@deepseek-ai/dsh-client-ui-sidebar` 的 slot 契约）：
  *
- * 槽位选择采用「候选列表 + 逐个尝试」：`sidebar.header.action` 在本地未能验证存在，
- * 因此按 header → footer 顺序尝试，取首个注册不抛错的槽位。
+ *   1. `sidebar.panellist`（kind: list, scope: root）注册一个**图标条目**，
+ *      `id` 即主面板 key。宿主渲染行与按钮、从条目 metadata 解析 label、
+ *      点击时调 `ctx.layout.selectPanel(id)` —— 宿主拥有按钮，这里只画图标。
+ *   2. `main`（kind: keyed, scope: root）用**同一个 id** 注册面板主体。
+ *      宿主在条目被选中时以该 id 为 key 渲染 main。
+ *
+ * 关于降级：`slots.inject` 只在目标槽位**被声明后**触发回调；未被声明的槽位
+ * 既不触发也不抛错。因此两路可并存——谁被声明谁生效。老版本若没有
+ * `sidebar.panellist`，则落到 `sidebar.footer.action`（侧边栏底部，Settings 旁）。
+ *
+ * 注意（上一版的真实 bug）：`sidebar.header.action` 在 stock dsh 中**不被声明**，
+ * 而 `inject` 不抛错，所以旧代码的「候选槽位逐个 try/catch」永远选中第一个，
+ * 降级分支从未执行 —— 入口因此消失。
+ *
  * @module dsh-zmtgzt/client
  */
 import { Component, useCallback, useEffect, useRef, useState, type ReactNode } from 'react'
@@ -18,44 +28,20 @@ export const inject = ['slots', 'connection', 'locale']
 
 const API = '/api/zmtgzt'
 const TITLE_ZH = '自媒体工作台'
-const TITLE_EN = 'Creator Workbench'
 
-/** 候选入口槽位：优先侧边栏顶部，回退到底部动作区（后者已在同类插件中实测可用）。 */
-const ENTRY_SLOTS = ['sidebar.header.action', 'sidebar.footer.action']
+/** 入口条目 id，同时也是 `main` keyed 槽位的 key —— 两处必须一致。 */
+const PANEL_ID = 'zmtgzt-workbench'
+/** 条目排序：与内置条目并列，数值越小越靠上。 */
+const PANEL_ORDER = 30
+
+/**
+ * 通过注入的服务选择主面板（降级入口点击时用；panellist 路径由宿主代劳）。
+ * layout 服务可能不存在，因此这里不做硬依赖、失败即静默。
+ */
+let selectPanel: ((id: string) => void) | null = null
 
 const TABS = ['总览', '账号', '画像', '主题', '环境自检'] as const
 type Tab = (typeof TABS)[number]
-
-// ---------------------------------------------------------------------------
-// 轻量状态：入口与面板之间共享「是否打开」
-// ---------------------------------------------------------------------------
-
-let openState = false
-const openListeners = new Set<() => void>()
-
-function setOpen(next: boolean) {
-  if (openState === next) return
-  openState = next
-  for (const listener of openListeners) {
-    try {
-      listener()
-    } catch {
-      /* 单个订阅者异常不影响其它 */
-    }
-  }
-}
-
-function useOpenState(): boolean {
-  const [value, setValue] = useState(openState)
-  useEffect(() => {
-    const listener = () => setValue(openState)
-    openListeners.add(listener)
-    return () => {
-      openListeners.delete(listener)
-    }
-  }, [])
-  return value
-}
 
 async function api<T>(path: string, init?: RequestInit): Promise<T> {
   const res = await fetch(`${API}${path}`, {
@@ -70,76 +56,101 @@ async function api<T>(path: string, init?: RequestInit): Promise<T> {
 // ---------------------------------------------------------------------------
 
 export function apply(ctx: any) {
-  const title = () => TITLE_ZH
+  const slots = ctx?.slots
+  if (!slots?.inject || !slots?.register) return
 
-  // 1. 侧边栏入口（候选槽位逐个尝试，取首个不抛错的）
-  let anchor: string | null = null
-  for (const slot of ENTRY_SLOTS) {
-    try {
-      ctx.slots.inject(
-        slot,
-        () =>
-          ctx.slots.register(
-            {
-              name: slot,
-              id: 'dsh-zmtgzt',
-              order: 30,
-              label: title,
-            },
-            WorkbenchEntry
-          ),
-        'dsh-zmtgzt: sidebar entry'
-      )
-      anchor = slot
-      break
-    } catch {
-      continue
+  // layout 服务供「降级入口」点击时切面板；panellist 路径由宿主处理点击。
+  // 不写进 inject 数组：layout 缺失不应阻断整个界面加载。
+  try {
+    const layout = ctx.get?.('layout')
+    if (typeof layout?.selectPanel === 'function') {
+      selectPanel = (id: string) => layout.selectPanel(id)
     }
-  }
-
-  // 2. 工作台面板（浮层承载，打开时覆盖在主区域之上）
-  try {
-    ctx.slots.inject(
-      'shell.overlay',
-      () =>
-        ctx.slots.register(
-          {
-            name: 'shell.overlay',
-            id: 'dsh-zmtgzt-workbench',
-            order: 90,
-          },
-          WorkbenchPanel
-        ),
-      'dsh-zmtgzt: workbench panel'
-    )
   } catch {
-    /* 浮层不可用时入口仍可点击，面板不显示 */
+    /* 忽略：没有 layout 时降级入口仅提示，不影响 panellist 主路径 */
   }
 
+  const label = () => TITLE_ZH
+  let panellistLive = false
+  let footerDispose: (() => void) | null = null
+
+  // 1. 主面板（keyed）：key 必须与下面入口条目的 id 相同
+  slots.inject('main', () => slots.register({ name: 'main', key: PANEL_ID }, WorkbenchPanel))
+
+  // 2. 首选入口：侧边栏全局图标条 —— 与内置「插件」条目同一位置
+  slots.inject('sidebar.panellist', () => {
+    panellistLive = true
+    // panellist 可用则撤掉降级入口，避免出现两个入口
+    if (footerDispose) {
+      try {
+        footerDispose()
+      } catch {
+        /* 已失效 */
+      }
+      footerDispose = null
+    }
+    return slots.register(
+      { name: 'sidebar.panellist', id: PANEL_ID, order: PANEL_ORDER, label },
+      WorkbenchIcon
+    )
+  })
+
+  // 3. 降级入口：老版本未声明 panellist 时，落到侧边栏底部动作区
+  slots.inject('sidebar.footer.action', () => {
+    if (panellistLive) return
+    footerDispose = slots.register(
+      { name: 'sidebar.footer.action', id: PANEL_ID, order: PANEL_ORDER, label },
+      WorkbenchFooterEntry
+    )
+    return footerDispose
+  })
+
   try {
-    ctx.effect?.(() => () => setOpen(false), 'dsh-zmtgzt: reset panel state')
-    ctx.logger?.info?.(`[dsh-zmtgzt] 工作台入口锚点：${anchor ?? '未注册成功'}`)
+    ctx.logger?.info?.(
+      '[dsh-zmtgzt] 工作台入口：首选 sidebar.panellist（左侧导航「插件」同位），' +
+        '降级 sidebar.footer.action'
+    )
   } catch {
     /* 忽略 */
   }
 }
 
-/** 侧边栏入口按钮。 */
-function WorkbenchEntry() {
-  const open = useOpenState()
+/**
+ * 侧边栏入口图标。宿主提供按钮外壳与 label，这里只画图标。
+ * owner props：`{ size: number; active: boolean }`（见 sidebar 包的 slot 契约）。
+ */
+function WorkbenchIcon({ size = 16, active }: { size?: number; active?: boolean }) {
+  return (
+    <svg
+      width={size}
+      height={size}
+      viewBox="0 0 16 16"
+      fill="none"
+      aria-hidden="true"
+      style={{ display: 'block', opacity: active ? 1 : 0.72 }}
+    >
+      <rect x="1.4" y="1.9" width="13.2" height="12.2" rx="2.4" stroke="currentColor" strokeWidth="1.3" />
+      <path d="M1.4 6.1h13.2" stroke="currentColor" strokeWidth="1.3" />
+      <path d="M6.2 6.1v8" stroke="currentColor" strokeWidth="1.3" />
+    </svg>
+  )
+}
+
+/**
+ * 降级入口（`sidebar.footer.action`）。owner props：`{ wide: boolean }`。
+ * 这条路径的点击由本插件处理 —— 通过 layout 服务选中主面板。
+ */
+function WorkbenchFooterEntry({ wide = true }: { wide?: boolean }) {
   return (
     <button
       type="button"
-      onClick={() => setOpen(!open)}
+      onClick={() => selectPanel?.(PANEL_ID)}
       title={TITLE_ZH}
       aria-label={TITLE_ZH}
-      aria-pressed={open}
-      style={{ ...S.entryBtn, ...(open ? S.entryBtnActive : null) }}
+      style={{ ...S.entryBtn, justifyContent: wide ? 'flex-start' : 'center' }}
     >
-      <span style={S.entryIcon} aria-hidden="true">
-        ◆
-      </span>
-      <span style={S.entryLabel}>{TITLE_ZH}</span>
+      <WorkbenchIcon size={16} />
+      {wide && <span style={S.entryLabel}>{TITLE_ZH}</span>}
     </button>
   )
 }
@@ -149,43 +160,39 @@ function WorkbenchEntry() {
 // ---------------------------------------------------------------------------
 
 function WorkbenchPanel() {
-  const open = useOpenState()
   const [tab, setTab] = useState<Tab>('总览')
-  if (!open) return null
 
   return (
-    <div style={S.overlayBackdrop}>
-      <section style={S.panel} role="dialog" aria-label={TITLE_ZH}>
-        <header style={S.header}>
-          <strong style={{ fontSize: 14 }}>{TITLE_ZH}</strong>
-          <span style={S.version}>dsh-zmtgzt</span>
-          <span style={{ flex: 1 }} />
-          <button style={S.closeBtn} onClick={() => setOpen(false)} aria-label="关闭">
-            ×
+    <section style={S.panel} aria-label={TITLE_ZH}>
+      <header style={S.header}>
+        <strong style={{ fontSize: 14 }}>{TITLE_ZH}</strong>
+        <span style={S.version}>dsh-zmtgzt</span>
+        <span style={{ flex: 1 }} />
+        <button style={S.ghostBtn} onClick={() => selectPanel?.('conversation')}>
+          返回对话
+        </button>
+      </header>
+      <nav style={S.tabs}>
+        {TABS.map((label) => (
+          <button
+            key={label}
+            onClick={() => setTab(label)}
+            style={{ ...S.tab, ...(tab === label ? S.tabActive : null) }}
+          >
+            {label}
           </button>
-        </header>
-        <nav style={S.tabs}>
-          {TABS.map((label) => (
-            <button
-              key={label}
-              onClick={() => setTab(label)}
-              style={{ ...S.tab, ...(tab === label ? S.tabActive : null) }}
-            >
-              {label}
-            </button>
-          ))}
-        </nav>
-        <div style={S.body}>
-          <PaneBoundary key={tab}>
-            {tab === '总览' && <OverviewPane onNavigate={setTab} />}
-            {tab === '账号' && <AccountPane />}
-            {tab === '画像' && <ProfilePane />}
-            {tab === '主题' && <TopicPane />}
-            {tab === '环境自检' && <DoctorPane />}
-          </PaneBoundary>
-        </div>
-      </section>
-    </div>
+        ))}
+      </nav>
+      <div style={S.body}>
+        <PaneBoundary key={tab}>
+          {tab === '总览' && <OverviewPane onNavigate={setTab} />}
+          {tab === '账号' && <AccountPane />}
+          {tab === '画像' && <ProfilePane />}
+          {tab === '主题' && <TopicPane />}
+          {tab === '环境自检' && <DoctorPane />}
+        </PaneBoundary>
+      </div>
+    </section>
   )
 }
 
@@ -834,27 +841,14 @@ const S: Record<string, React.CSSProperties> = {
     fontSize: 13,
     textAlign: 'left',
   },
-  entryBtnActive: { background: activeBg, fontWeight: 600 },
-  entryIcon: { opacity: 0.8 },
   entryLabel: { overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' },
 
-  overlayBackdrop: {
-    position: 'fixed',
-    inset: 0,
-    background: 'color-mix(in oklab, currentColor 25%, transparent)',
-    display: 'flex',
-    justifyContent: 'flex-start',
-    zIndex: 60,
-  },
+  // 主区域面板：填满宿主给 main 面板的容器，不再自带浮层与宽度
   panel: {
-    width: 'min(920px, 88vw)',
-    height: '100%',
-    background: 'Canvas',
-    color: 'CanvasText',
-    borderRight: `1px solid ${border}`,
     display: 'flex',
     flexDirection: 'column',
-    boxShadow: '0 0 32px rgba(0,0,0,.18)',
+    height: '100%',
+    minHeight: 0,
     overflow: 'hidden',
   },
   header: {
@@ -863,15 +857,6 @@ const S: Record<string, React.CSSProperties> = {
     gap: 8,
     padding: '10px 14px',
     borderBottom: `1px solid ${border}`,
-  },
-  closeBtn: {
-    background: 'transparent',
-    border: 'none',
-    color: 'inherit',
-    fontSize: 20,
-    lineHeight: 1,
-    cursor: 'pointer',
-    opacity: 0.7,
   },
   version: { fontSize: 11, opacity: 0.55 },
   tabs: { display: 'flex', gap: 4, padding: '8px 12px 0', flexWrap: 'wrap' },

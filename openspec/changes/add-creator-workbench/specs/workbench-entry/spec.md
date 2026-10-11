@@ -10,21 +10,60 @@
 
 ### Requirement: 侧边栏工作台入口
 
-系统 SHALL 在 DSH 侧边栏注册一个工作台入口，显示名称为「自媒体工作台」（英文 "Creator Workbench"）。
-该入口 SHALL 带图标，并 SHALL 通过 `ctx.slots` 注册而非占用会话视图页签。
+系统 SHALL 用官方的**两段式注册**提供入口（与内置「插件」条目同一机制）：
 
-入口 SHALL 优先注册到侧边栏的顶部动作区；当宿主未提供顶部槽位时，SHALL 回退注册到已验证可用的
-`sidebar.footer.action`，并在工作台「环境自检」页注明实际锚点位置。
+1. `sidebar.panellist`（`kind: list`, `scope: root`）注册一个**图标条目**，
+   条目 MUST 携带 `id`，SHOULD 携带 `order` 与 `label`。宿主渲染行与按钮、
+   从条目 metadata 解析 label、并在点击时选中该面板 ——
+   插件 MUST NOT 自行绘制整行按钮或承担点击路由。
+2. `main`（`kind: keyed`, `scope: root`）用**同一个 id** 作为 `key` 注册面板主体。
 
-#### Scenario: 入口出现在侧边栏而非会话页签
+条目 id 与 `main` 的 key MUST 完全一致；不一致时宿主选中条目将找不到面板。
 
-- **WHEN** 用户打开任意会话并查看左侧栏
-- **THEN** 侧边栏出现带图标的「自媒体工作台」入口，且会话视图页签数量不因本插件增加
+图标条目组件 SHALL 只渲染图标，并接受宿主提供的 `{ size, active }`；
+`active` 为真时 SHOULD 呈现选中态。
 
-#### Scenario: 顶部槽位不可用时回退且如实告知
+#### Scenario: 入口与内置「插件」条目同位
 
-- **WHEN** 宿主未提供侧边栏顶部动作槽位
-- **THEN** 入口注册到 `sidebar.footer.action`，且「环境自检」页显示当前锚点为该槽位
+- **WHEN** 用户查看左侧导航栏
+- **THEN** 「自媒体工作台」条目出现在侧边栏全局条目区域（与内置「插件」条目同区），且带图标
+
+#### Scenario: 点击条目的选中由宿主驱动
+
+- **WHEN** 用户点击「自媒体工作台」条目
+- **THEN** 宿主以该条目 id 为 key 渲染 `main` 面板，主区域显示工作台
+
+#### Scenario: id 与 key 一致
+
+- **WHEN** 检查注册结果
+- **THEN** `sidebar.panellist` 条目的 `id` 与 `main` 注册项的 `key` 为同一字符串
+
+### Requirement: 入口注册的降级与槽位合法性
+
+插件 MUST NOT 注册到宿主未声明的槽位。由于 `slots.inject` 对未声明槽位既不触发也不抛错，
+入口的降级 MUST NOT 依赖「注册时逐个 try/catch 后取第一个候选」——该写法会永远停在第一个候选，
+使降级分支永不执行。
+
+入口 SHALL 首选 `sidebar.panellist`；宿主未声明该槽位时（早期版本），SHALL 降级注册到
+`sidebar.footer.action`。两条路径 SHALL 可并存而不互相阻塞；当 `sidebar.panellist` 生效时
+MUST 撤销已注册的降级入口，避免同一功能出现两个入口。
+
+降级入口 SHALL 通过 layout 服务选中主面板，且 MUST NOT 因 layout 服务缺失而阻断首选路径。
+
+#### Scenario: 宿主无 panellist 时降级
+
+- **WHEN** 宿主未声明 `sidebar.panellist` 但声明了 `sidebar.footer.action`
+- **THEN** 入口注册到 `sidebar.footer.action`，点击后仍能在主区域打开工作台
+
+#### Scenario: 两路同时可用时不出现重复入口
+
+- **WHEN** 宿主同时声明了两个槽位
+- **THEN** 只保留 `sidebar.panellist` 入口，降级入口被撤销
+
+#### Scenario: 不注册到未声明槽位
+
+- **WHEN** 插件初始化
+- **THEN** 不存在对 `sidebar.header.action` 这类宿主未声明槽位的注册尝试
 
 ### Requirement: 工作台页面在主区域打开
 

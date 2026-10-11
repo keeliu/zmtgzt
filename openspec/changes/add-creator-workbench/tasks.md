@@ -73,4 +73,65 @@
 | HTTP 路由 | ✅ 已测 | 15 条端点全部注册 |
 | **扫码登录的真实交互** | ⚠️ 未端到端验证 | 代码覆盖「发起登录返回会话」「状态轮询」「登出」，但扫码本身需真机与已装 Playwright；本环境无 Python/Playwright 与可扫码账号 |
 | **实际发布到平台** | ⚠️ 未端到端验证 | 同上：依赖登录态与平台风控，未在真实账号上跑过 |
-| 侧边栏顶部槽位 `sidebar.header.action` | ⚠️ 未验证存在 | 采用候选回退策略，实际锚点在「环境自检」页可见 |
+| 侧边栏入口槽位 | ✅ 已定论（见下节） | `sidebar.header.action` 在 stock dsh **不存在**；正确机制为 `sidebar.panellist` + `main` 两段式 |
+
+---
+
+## 入口修复记录（2026-10-11 第二轮）
+
+上一版入口在界面上消失。根因是**注册到了宿主永不声明的槽位**，且失败被静默吞掉。
+
+### 根因
+
+官方 `slots.inject(name, cb)` 的语义是「等目标槽位被声明后触发回调」：
+
+- 槽位**未声明**时：不触发、**也不抛错**
+- 而 `slots.register` 注册到未声明槽位**才会**抛错
+
+旧代码写成「候选槽位列表 + 逐个 try/catch 取第一个不抛错的」：
+
+```ts
+for (const slot of ['sidebar.header.action', 'sidebar.footer.action']) {
+  try { ctx.slots.inject(slot, () => ctx.slots.register({ name: slot, ... }, Entry)); break }
+  catch { continue }
+}
+```
+
+`inject` 立即返回且从不抛错 → **永远 `break` 在第一个候选** `sidebar.header.action`；
+而该槽位 stock dsh 并不声明 → 回调永不触发，
+可用的 `sidebar.footer.action` **从未被尝试**。入口因此消失。
+
+### 官方正确机制（已核实到类型定义，非推测）
+
+`@deepseek-ai/dsh-client-ui-sidebar` 的 slot 契约原文：
+
+```
+'sidebar.panellist': { kind: 'list'; scope: 'root'; owner: SidebarPanelIconOwnerProps }
+// Global panel icons. Each list id addresses the matching main panel;
+// the sidebar owns the button and resolves its label from list metadata.
+
+'main': { kind: 'keyed'; scope: 'root' }   // 定义于 dsh-client-ui-layout
+// Central panel selected by sidebar entry id.
+```
+
+即**两段式**：`sidebar.panellist` 注册图标条目（`id` / `order` / `label`），
+`main` 以**同一 id** 作为 `key` 注册面板主体。截图里内置「插件」条目走的就是这条路径。
+
+### 改动
+
+- 入口改为两段式注册，条目 `id` 与 `main` 的 `key` 共用同一常量
+- 图标组件按 owner props 契约只画图标，接收 `{ size, active }`（宿主拥有按钮与点击）
+- 面板由浮层（`shell.overlay`）改为主区域面板；「返回对话」经 layout 服务
+- 降级改为**两路并存**：同时 `inject` panellist 与 footer.action，
+  panellist 生效时撤销 footer —— 不再依赖「谁先抛错」
+- 移除 `sidebar.header.action` / `shell.overlay` / `conversation.view` 全部引用
+
+### 新增测试
+
+`scripts/ui-entry.mjs`（23 项断言）。此前的测试**完全没有覆盖 UI 入口注册**，
+这正是 bug 长期未被发现的原因。覆盖：
+
+- 现代路径：panellist + main 注册、id 与 key 一致、label 与 order 正确
+- 降级路径：无 panellist 时落到 footer，且 panellist 后到时改用它并撤销 footer
+- 契约一致性：注册到未声明槽位抛错、`inject` 不抛错（复现旧 bug 成因）
+- 回归：废弃槽位不得再出现在构建产物中
